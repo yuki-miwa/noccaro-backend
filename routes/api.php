@@ -1,6 +1,11 @@
 <?php
 
 use App\Exceptions\ApiException;
+use App\Http\Controllers\Api\V1\AdminMembershipController;
+use App\Http\Controllers\Api\V1\AdminPostController;
+use App\Http\Controllers\Api\V1\AdminReportController;
+use App\Http\Controllers\Api\V1\AdminSpaceController;
+use App\Http\Controllers\Api\V1\AdminWhisperController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\DeviceController;
 use App\Http\Controllers\Api\V1\MeController;
@@ -36,6 +41,30 @@ Route::prefix('v1')->group(function (): void {
 
         Route::post('/devices/register', [DeviceController::class, 'register']);
         Route::post('/devices/unregister', [DeviceController::class, 'unregister']);
+
+        Route::prefix('/admin')->group(function (): void {
+            Route::get('/spaces/{space}', [AdminSpaceController::class, 'show']);
+            Route::patch('/spaces/{space}', [AdminSpaceController::class, 'update']);
+            Route::get('/spaces/{space}/join-requests', [AdminSpaceController::class, 'joinRequests']);
+            Route::get('/spaces/{space}/members', [AdminSpaceController::class, 'members']);
+            Route::get('/spaces/{space}/posts', [AdminSpaceController::class, 'posts']);
+            Route::post('/spaces/{space}/posts', [AdminSpaceController::class, 'createPost']);
+            Route::get('/spaces/{space}/reports', [AdminSpaceController::class, 'reports']);
+            Route::get('/spaces/{space}/notifications', [AdminSpaceController::class, 'notifications']);
+            Route::post('/spaces/{space}/notifications', [AdminSpaceController::class, 'createNotification']);
+
+            Route::post('/memberships/{membership}/approve', [AdminMembershipController::class, 'approve']);
+            Route::post('/memberships/{membership}/reject', [AdminMembershipController::class, 'reject']);
+            Route::patch('/memberships/{membership}', [AdminMembershipController::class, 'update']);
+
+            Route::patch('/posts/{post}', [AdminPostController::class, 'update']);
+            Route::post('/posts/{post}/publish', [AdminPostController::class, 'publish']);
+            Route::post('/posts/{post}/archive', [AdminPostController::class, 'archive']);
+            Route::delete('/posts/{post}', [AdminPostController::class, 'destroy']);
+
+            Route::post('/reports/{report}/resolve', [AdminReportController::class, 'resolve']);
+            Route::post('/whispers/{whisper}/remove', [AdminWhisperController::class, 'remove']);
+        });
     });
 
     Route::fallback(function () {

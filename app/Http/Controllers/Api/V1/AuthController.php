@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Support\Api\ApiResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends ApiController
@@ -64,7 +65,7 @@ class AuthController extends ApiController
         ]);
     }
 
-    public function logout(Request $request): JsonResponse
+    public function logout(Request $request): Response
     {
         $request->user()->currentAccessToken()?->delete();
 

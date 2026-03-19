@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 
 abstract class ApiController extends Controller
 {
@@ -20,7 +21,7 @@ abstract class ApiController extends Controller
         ], $status);
     }
 
-    protected function noContent(): JsonResponse
+    protected function noContent(): Response
     {
         return response()->noContent();
     }
