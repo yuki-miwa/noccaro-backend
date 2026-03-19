@@ -4,15 +4,15 @@ Noccaro の Laravel backend です。Flutter モバイルアプリと Web 管理
 
 ## 現在の実装状況
 
-このフェーズでは public P0 を優先して実装しています。
+このフェーズでは public P0 と管理 API の MVP を実装しています。
 
 - Laravel 12
 - Sanctum Bearer token 認証
 - SQLite in-memory での feature test
 - PostgreSQL / Redis を本番想定とした `.env.example`
 - public API の最小実装
-
-owner admin API / system admin API は後続フェーズです。
+- owner admin API
+- system admin API
 
 ## 実装済み public API
 
@@ -40,6 +40,7 @@ owner admin API / system admin API は後続フェーズです。
 
 - [docs/backend_bootstrap_plan.md](docs/backend_bootstrap_plan.md)
 - [docs/p0_surface_map.md](docs/p0_surface_map.md)
+- [docs/lightsail_single_node_deploy.md](docs/lightsail_single_node_deploy.md)
 
 ## ローカル実行
 
@@ -75,7 +76,16 @@ cd /Users/yuki.miwa/Documents/git/noccaro-backend
 - owner: `owner@noccaro.local` / `password123`
 - guest: `guest@noccaro.local` / `password123`
 - pending: `pending@noccaro.local` / `password123`
+- system admin: `sysadmin@noccaro.local` / `password123`
 - sample space code: `NOC2026`
+
+## system admin アカウント作成
+
+本番や検証環境で system admin を発行する場合は次を使います。
+
+```bash
+php artisan noccaro:create-system-admin ops@example.com "Noccaro 運営管理者" --password="strong-password"
+```
 
 ## 設計メモ
 
@@ -87,8 +97,6 @@ cd /Users/yuki.miwa/Documents/git/noccaro-backend
 
 ## 既知事項
 
-- owner admin API / system admin API は未実装
-- PostgreSQL 専用の partial index / trigger / audit log 最適化は未着手
+- PostgreSQL 専用の partial index / trigger 最適化は未着手
 - queue / push delivery 実装は未着手
-- 本番運用では PostgreSQL / Redis を別途用意する必要があります
-
+- 本番運用では PostgreSQL / Redis の監視とバックアップ設計が別途必要です

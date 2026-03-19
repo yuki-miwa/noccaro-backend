@@ -11,12 +11,19 @@ use App\Http\Controllers\Api\V1\DeviceController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PostController;
 use App\Http\Controllers\Api\V1\SpaceController;
+use App\Http\Controllers\Api\V1\SystemAdminAuditController;
+use App\Http\Controllers\Api\V1\SystemAdminAuthController;
+use App\Http\Controllers\Api\V1\SystemAdminDashboardController;
+use App\Http\Controllers\Api\V1\SystemAdminReportController;
+use App\Http\Controllers\Api\V1\SystemAdminSpaceController;
+use App\Http\Controllers\Api\V1\SystemAdminUserController;
 use App\Http\Controllers\Api\V1\WhisperController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
+    Route::post('/system-admin/auth/login', [SystemAdminAuthController::class, 'login']);
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
@@ -64,6 +71,26 @@ Route::prefix('v1')->group(function (): void {
 
             Route::post('/reports/{report}/resolve', [AdminReportController::class, 'resolve']);
             Route::post('/whispers/{whisper}/remove', [AdminWhisperController::class, 'remove']);
+        });
+
+        Route::prefix('/system-admin')->group(function (): void {
+            Route::post('/auth/logout', [SystemAdminAuthController::class, 'logout']);
+            Route::get('/me', [SystemAdminAuthController::class, 'me']);
+            Route::get('/dashboard', [SystemAdminDashboardController::class, 'show']);
+
+            Route::get('/spaces', [SystemAdminSpaceController::class, 'index']);
+            Route::post('/spaces', [SystemAdminSpaceController::class, 'store']);
+            Route::get('/spaces/{space}', [SystemAdminSpaceController::class, 'show']);
+            Route::patch('/spaces/{space}', [SystemAdminSpaceController::class, 'update']);
+            Route::post('/spaces/{space}/primary-owner', [SystemAdminSpaceController::class, 'assignPrimaryOwner']);
+
+            Route::get('/users', [SystemAdminUserController::class, 'index']);
+            Route::patch('/users/{user}', [SystemAdminUserController::class, 'update']);
+
+            Route::get('/reports', [SystemAdminReportController::class, 'index']);
+            Route::post('/reports/{report}/resolve', [SystemAdminReportController::class, 'resolve']);
+
+            Route::get('/audit-logs', [SystemAdminAuditController::class, 'index']);
         });
     });
 

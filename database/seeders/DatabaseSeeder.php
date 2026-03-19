@@ -6,6 +6,7 @@ use App\Models\MapWhisper;
 use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Models\SpacePost;
+use App\Models\SystemAdmin;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -37,6 +38,19 @@ class DatabaseSeeder extends Seeder
             'email' => 'pending@noccaro.local',
             'display_name' => 'Pending Guest',
             'password' => Hash::make('password123'),
+            'status' => 'active',
+        ]);
+
+        $systemAdminUser = User::query()->create([
+            'email' => 'sysadmin@noccaro.local',
+            'display_name' => 'Noccaro 運営管理者',
+            'password' => Hash::make('password123'),
+            'status' => 'active',
+            'last_login_at' => now(),
+        ]);
+
+        SystemAdmin::query()->create([
+            'user_id' => $systemAdminUser->id,
             'status' => 'active',
         ]);
 

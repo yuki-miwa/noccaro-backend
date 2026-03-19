@@ -8,6 +8,8 @@ use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Models\SpaceNotification;
 use App\Models\SpacePost;
+use App\Models\SystemAdmin;
+use App\Models\SystemAdminAuditLog;
 use App\Models\User;
 use App\Models\UserPushDevice;
 
@@ -213,6 +215,140 @@ class ApiResource
             'sentAt' => self::iso($notification->sent_at),
             'createdAt' => self::iso($notification->created_at),
             'updatedAt' => self::iso($notification->updated_at),
+        ];
+    }
+
+    public static function systemAdmin(SystemAdmin $admin): array
+    {
+        $user = $admin->user;
+
+        return [
+            'id' => $admin->public_id,
+            'email' => $user->email,
+            'displayName' => $user->display_name,
+            'role' => 'system_admin',
+            'createdAt' => self::iso($admin->created_at),
+        ];
+    }
+
+    public static function systemSpaceResource(Space $space): array
+    {
+        return [
+            'id' => $space->public_id,
+            'code' => $space->space_code,
+            'name' => $space->name,
+            'description' => $space->description,
+            'joinPolicy' => $space->join_policy,
+            'status' => $space->status,
+            'maxOwnerCount' => $space->max_owner_count,
+            'whisperTtlMinutes' => $space->whisper_ttl_minutes,
+            'whisperMaxLength' => $space->whisper_max_length,
+            'locationGridMeters' => $space->location_grid_meters,
+            'locationJitterEnabled' => $space->location_jitter_enabled,
+            'createdAt' => self::iso($space->created_at),
+        ];
+    }
+
+    public static function systemSpaceSummary(Space $space): array
+    {
+        $space->loadMissing(['memberships.user', 'reports']);
+
+        $primaryOwner = $space->memberships
+            ->first(fn (SpaceMembership $membership) => $membership->role === 'primary_owner' && $membership->status === 'active');
+
+        return [
+            'space' => self::systemSpaceResource($space),
+            'primaryOwner' => [
+                'membershipId' => $primaryOwner?->public_id,
+                'userId' => $primaryOwner?->user?->public_id,
+                'displayName' => $primaryOwner?->user?->display_name,
+                'email' => $primaryOwner?->user?->email,
+            ],
+            'metrics' => [
+                'memberCount' => $space->memberships
+                    ->filter(fn (SpaceMembership $membership) => in_array($membership->status, ['active', 'pending', 'suspended'], true))
+                    ->count(),
+                'pendingCount' => $space->memberships->where('status', 'pending')->count(),
+                'ownerCount' => $space->memberships
+                    ->filter(fn (SpaceMembership $membership) => in_array($membership->role, ['owner', 'primary_owner'], true) && $membership->status === 'active')
+                    ->count(),
+                'openReportCount' => $space->reports
+                    ->filter(fn (ContentReport $report) => in_array($report->status, ['open', 'reviewing'], true))
+                    ->count(),
+            ],
+        ];
+    }
+
+    public static function systemUserSummary(User $user): array
+    {
+        $user->loadMissing(['memberships.space']);
+
+        return [
+            'user' => self::user($user),
+            'memberships' => $user->memberships
+                ->map(fn (SpaceMembership $membership) => [
+                    'membershipId' => $membership->public_id,
+                    'spaceId' => $membership->space?->public_id,
+                    'spaceName' => $membership->space?->name,
+                    'role' => $membership->role,
+                    'status' => self::publicMembershipStatus($membership->status),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    public static function systemReportSummary(ContentReport $report): array
+    {
+        $report->loadMissing(['space', 'reporterMembership.user']);
+
+        $targetBody = null;
+        if ($report->target_type === 'whisper') {
+            $targetBody = MapWhisper::query()->find($report->target_id)?->body;
+        }
+
+        return [
+            'report' => [
+                'id' => $report->public_id,
+                'spaceId' => $report->space?->public_id,
+                'targetType' => $report->target_type,
+                'targetId' => $report->target_type === 'whisper'
+                    ? (MapWhisper::query()->find($report->target_id)?->public_id ?? (string) $report->target_id)
+                    : (string) $report->target_id,
+                'reasonType' => $report->reason_type,
+                'status' => $report->status,
+                'resolutionType' => $report->resolution_type,
+                'createdAt' => self::iso($report->created_at),
+                'handledAt' => self::iso($report->handled_at),
+            ],
+            'space' => [
+                'id' => $report->space?->public_id,
+                'code' => $report->space?->space_code,
+                'name' => $report->space?->name,
+            ],
+            'target' => [
+                'id' => $report->target_type === 'whisper'
+                    ? (MapWhisper::query()->find($report->target_id)?->public_id ?? (string) $report->target_id)
+                    : (string) $report->target_id,
+                'body' => $targetBody ?? '対象コンテンツ',
+            ],
+            'reporter' => [
+                'id' => $report->reporterMembership?->user?->public_id,
+                'email' => $report->reporterMembership?->user?->email,
+                'displayName' => $report->reporterMembership?->user?->display_name,
+            ],
+        ];
+    }
+
+    public static function systemAuditLog(SystemAdminAuditLog $log): array
+    {
+        return [
+            'id' => $log->public_id,
+            'action' => $log->action,
+            'entityType' => $log->entity_type,
+            'entityId' => $log->entity_public_id,
+            'message' => $log->message,
+            'createdAt' => self::iso($log->created_at),
         ];
     }
 
