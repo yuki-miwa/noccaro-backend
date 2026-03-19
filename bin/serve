@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -p 8000:8000 -v "$ROOT_DIR:/app" -w /app composer php artisan serve --host=0.0.0.0 --port=8000 "$@"

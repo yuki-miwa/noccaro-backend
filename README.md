@@ -1,59 +1,94 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# noccaro-backend
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Noccaro の Laravel backend です。Flutter モバイルアプリと Web 管理画面が接続する API を提供します。
 
-## About Laravel
+## 現在の実装状況
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+このフェーズでは public P0 を優先して実装しています。
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- Laravel 12
+- Sanctum Bearer token 認証
+- SQLite in-memory での feature test
+- PostgreSQL / Redis を本番想定とした `.env.example`
+- public API の最小実装
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+owner admin API / system admin API は後続フェーズです。
 
-## Learning Laravel
+## 実装済み public API
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/logout`
+- `POST /api/v1/auth/refresh`
+- `GET /api/v1/me`
+- `GET /api/v1/me/notification-settings`
+- `PUT /api/v1/me/notification-settings`
+- `GET /api/v1/spaces/joined`
+- `GET /api/v1/spaces/{spaceId}`
+- `GET /api/v1/spaces/{spaceId}/membership`
+- `POST /api/v1/spaces/join`
+- `GET /api/v1/spaces/{spaceId}/posts`
+- `GET /api/v1/posts/{postId}`
+- `PUT /api/v1/posts/{postId}/reaction`
+- `GET /api/v1/spaces/{spaceId}/whispers`
+- `POST /api/v1/spaces/{spaceId}/whispers`
+- `POST /api/v1/whispers/{whisperId}/report`
+- `POST /api/v1/devices/register`
+- `POST /api/v1/devices/unregister`
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## 主要ドキュメント
 
-## Laravel Sponsors
+- [docs/backend_bootstrap_plan.md](docs/backend_bootstrap_plan.md)
+- [docs/p0_surface_map.md](docs/p0_surface_map.md)
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## ローカル実行
 
-### Premium Partners
+この環境では `php` / `composer` が未インストールでも動かせるように、Docker wrapper を同梱しています。
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+前提:
+- Docker daemon が起動していること
+- 初回は `colima start` などで Docker runtime を立ち上げること
 
-## Contributing
+### サーバー起動
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```bash
+cd /Users/yuki.miwa/Documents/git/noccaro-backend
+./bin/serve
+```
 
-## Code of Conduct
+- API URL: `http://127.0.0.1:8000/api/v1`
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### migration / seed
 
-## Security Vulnerabilities
+```bash
+./bin/artisan migrate:fresh --seed
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### test
 
-## License
+```bash
+./bin/test
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## 開発用 seed アカウント
+
+- owner: `owner@noccaro.local` / `password123`
+- guest: `guest@noccaro.local` / `password123`
+- pending: `pending@noccaro.local` / `password123`
+- sample space code: `NOC2026`
+
+## 設計メモ
+
+- 業務ルールは承認済み仕様書と DDL を優先
+- API 契約は `noccaro-app/docs/backend_api_spec.md` を優先
+- public ID は UUID ベースの `public_id` を返却
+- エラーは `error.code`, `error.message`, `error.details` の envelope で返却
+- whisper の表示座標は server-side rounding + jitter で生成
+
+## 既知事項
+
+- owner admin API / system admin API は未実装
+- PostgreSQL 専用の partial index / trigger / audit log 最適化は未着手
+- queue / push delivery 実装は未着手
+- 本番運用では PostgreSQL / Redis を別途用意する必要があります
+
