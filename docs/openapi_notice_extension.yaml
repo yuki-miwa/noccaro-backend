@@ -1,13 +1,13 @@
 openapi: 3.0.3
 info:
   title: Noccaro Notice Extension Draft
-  version: 0.1.0
+  version: 0.2.0
 servers:
   - url: https://noccaro.duckdns.org/api/v1
 paths:
   /spaces/{spaceId}/posts:
     get:
-      summary: List notice posts for a space
+      summary: List visible notice posts for a space
       parameters:
         - in: path
           name: spaceId
@@ -20,7 +20,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [owner, operation, personal]
+            enum: [owner, operation]
         - in: query
           name: limit
           required: false
@@ -29,30 +29,9 @@ paths:
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Post'
-                  meta:
-                    type: object
-                    properties:
-                      hasMore:
-                        type: boolean
-                      nextCursor:
-                        nullable: true
-                        type: string
-                      limit:
-                        type: integer
-                      category:
-                        type: string
   /posts/{postId}:
     get:
-      summary: Get post detail
+      summary: Get visible post detail
       parameters:
         - in: path
           name: postId
@@ -63,16 +42,6 @@ paths:
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      post:
-                        $ref: '#/components/schemas/Post'
   /posts/{postId}/read:
     post:
       summary: Mark post as read
@@ -86,43 +55,9 @@ paths:
       responses:
         '200':
           description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      postId:
-                        type: string
-                        format: uuid
-                      isRead:
-                        type: boolean
-                      readAt:
-                        type: string
-                        format: date-time
-  /system-admin/spaces/{spaceId}/posts:
-    get:
-      summary: List system-admin managed posts in a space
-      parameters:
-        - in: path
-          name: spaceId
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - in: query
-          name: category
-          required: false
-          schema:
-            type: string
-            enum: [all, owner, operation, personal]
-      responses:
-        '200':
-          description: OK
+  /admin/spaces/{spaceId}/posts:
     post:
-      summary: Create operation or personal notice
+      summary: Create owner notice
       parameters:
         - in: path
           name: spaceId
@@ -135,33 +70,26 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [category, title, body, status]
-              properties:
-                category:
-                  type: string
-                  enum: [operation, personal]
-                title:
-                  type: string
-                body:
-                  type: string
-                status:
-                  type: string
-                  enum: [draft, published, archived]
-                notifyMembers:
-                  type: boolean
-                visibleFrom:
-                  nullable: true
-                  type: string
-                  format: date-time
-                visibleTo:
-                  nullable: true
-                  type: string
-                  format: date-time
-                recipientUserId:
-                  nullable: true
-                  type: string
-                  format: uuid
+              $ref: '#/components/schemas/OwnerPostMutation'
+      responses:
+        '201':
+          description: Created
+  /system-admin/spaces/{spaceId}/posts:
+    post:
+      summary: Create operation notice
+      parameters:
+        - in: path
+          name: spaceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperationPostMutation'
       responses:
         '201':
           description: Created
@@ -182,7 +110,10 @@ components:
           format: uuid
         category:
           type: string
-          enum: [owner, operation, personal]
+          enum: [owner, operation]
+        audienceType:
+          type: string
+          enum: [all_members, targeted_users]
         title:
           type: string
         body:
@@ -214,9 +145,51 @@ components:
           nullable: true
           type: string
           format: date-time
+        targetedToMe:
+          type: boolean
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    OwnerPostMutation:
+      type: object
+      required: [title, body, status]
+      properties:
+        category:
+          type: string
+          enum: [owner]
+        audienceType:
+          type: string
+          enum: [all_members, targeted_users]
+        recipientUserIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, archived]
+        notifyMembers:
+          type: boolean
+        visibleFrom:
+          nullable: true
+          type: string
+          format: date-time
+        visibleTo:
+          nullable: true
+          type: string
+          format: date-time
+    OperationPostMutation:
+      allOf:
+        - $ref: '#/components/schemas/OwnerPostMutation'
+        - type: object
+          properties:
+            category:
+              type: string
+              enum: [operation]
