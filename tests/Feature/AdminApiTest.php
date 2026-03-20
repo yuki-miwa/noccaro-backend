@@ -141,6 +141,7 @@ class AdminApiTest extends TestCase
     public function test_owner_can_manage_posts_and_notifications(): void
     {
         [$owner, $space] = $this->seedOwnerContext();
+        $guest = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
 
         Sanctum::actingAs($owner);
 
@@ -150,6 +151,8 @@ class AdminApiTest extends TestCase
 
         $created = $this->postJson('/api/v1/admin/spaces/'.$space->public_id.'/posts', [
             'category' => 'owner',
+            'audienceType' => 'targeted_users',
+            'recipientUserIds' => [$guest->public_id],
             'title' => '運営メモ',
             'body' => 'これは draft 記事です。',
             'status' => 'draft',
@@ -159,6 +162,8 @@ class AdminApiTest extends TestCase
         ])
             ->assertCreated()
             ->assertJsonPath('data.post.category', 'owner')
+            ->assertJsonPath('data.post.audienceType', 'targeted_users')
+            ->assertJsonPath('data.post.recipientUserIds.0', $guest->public_id)
             ->assertJsonPath('data.post.status', 'draft');
 
         $postId = $created->json('data.post.id');
@@ -167,9 +172,12 @@ class AdminApiTest extends TestCase
             'title' => '運営メモ 更新版',
             'body' => '公開前に本文を更新しました。',
             'status' => 'draft',
+            'audienceType' => 'all_members',
         ])
             ->assertOk()
-            ->assertJsonPath('data.post.title', '運営メモ 更新版');
+            ->assertJsonPath('data.post.title', '運営メモ 更新版')
+            ->assertJsonPath('data.post.audienceType', 'all_members')
+            ->assertJsonPath('data.post.recipientUserIds', []);
 
         $this->postJson('/api/v1/admin/posts/'.$postId.'/publish', [
             'notifyMembers' => true,
@@ -208,6 +216,18 @@ class AdminApiTest extends TestCase
             'title' => '不正なカテゴリ',
             'body' => 'owner admin では作れない',
             'status' => 'draft',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
+
+        $this->postJson('/api/v1/admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'owner',
+            'audienceType' => 'targeted_users',
+            'recipientUserIds' => [$guest->public_id],
+            'title' => '不正な通知設定',
+            'body' => 'targeted に notify は不可',
+            'status' => 'draft',
+            'notifyMembers' => true,
         ])
             ->assertStatus(422)
             ->assertJsonPath('error.code', 'VALIDATION_ERROR');

@@ -17,6 +17,7 @@ class SpacePost extends Model
     protected $fillable = [
         'space_id',
         'category',
+        'audience_type',
         'author_membership_id',
         'created_by_system_admin_id',
         'title',
@@ -32,6 +33,7 @@ class SpacePost extends Model
     {
         return [
             'category' => 'string',
+            'audience_type' => 'string',
             'notify_members' => 'boolean',
             'published_at' => 'datetime',
             'visible_from' => 'datetime',

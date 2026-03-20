@@ -7,9 +7,8 @@ use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Models\SpaceNotification;
 use App\Models\SpacePost;
-use App\Models\SpacePostDelivery;
-use App\Models\User;
 use App\Support\Api\ApiResource;
+use App\Support\Posts\PostAudienceService;
 use App\Support\SystemAdmin\SystemAdminAuditLogger;
 use App\Support\SystemAdmin\SystemAdminGuard;
 use Illuminate\Http\JsonResponse;
@@ -20,11 +19,15 @@ use Illuminate\Validation\Rule;
 
 class SystemAdminPostController extends ApiController
 {
-    public function index(Request $request, Space $space, SystemAdminGuard $guard): JsonResponse
-    {
+    public function index(
+        Request $request,
+        Space $space,
+        SystemAdminGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $guard->actor($request->user());
         $payload = $request->validate([
-            'category' => ['nullable', Rule::in(['all', 'owner', 'operation', 'personal'])],
+            'category' => ['nullable', Rule::in(['all', 'owner', 'operation'])],
         ]);
         $category = $payload['category'] ?? 'all';
 
@@ -40,7 +43,7 @@ class SystemAdminPostController extends ApiController
         $posts = $query->get();
 
         return $this->collection(
-            $this->systemPostItems($posts),
+            $this->systemPostItems($posts, $audienceService),
             [
                 'hasMore' => false,
                 'nextCursor' => null,
@@ -54,26 +57,30 @@ class SystemAdminPostController extends ApiController
         Space $space,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        PostAudienceService $audienceService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $payload = $request->validate([
-            'category' => ['required', Rule::in(['operation', 'personal'])],
+            'category' => ['required', Rule::in(['operation'])],
+            'audienceType' => ['nullable', Rule::in(['all_members', 'targeted_users'])],
+            'recipientUserIds' => ['nullable', 'array'],
+            'recipientUserIds.*' => ['string', 'uuid'],
             'title' => ['required', 'string', 'min:1', 'max:200'],
             'body' => ['required', 'string'],
             'status' => ['required', Rule::in(['draft', 'published', 'archived'])],
             'notifyMembers' => ['nullable', 'boolean'],
             'visibleFrom' => ['nullable', 'date'],
             'visibleTo' => ['nullable', 'date'],
-            'recipientUserId' => ['nullable', 'uuid'],
         ]);
 
         $authorMembership = $this->resolvePrimaryOwnerMembership($space);
-        $recipient = $this->resolveRecipient($space, $payload['category'], $payload['recipientUserId'] ?? null);
-        $notifyMembers = $this->normalizeNotifyMembers($payload['category'], (bool) ($payload['notifyMembers'] ?? false));
+        $audienceType = $audienceService->normalizeAudienceType($payload['audienceType'] ?? null);
+        $notifyMembers = $audienceService->normalizeNotifyMembers($audienceType, (bool) ($payload['notifyMembers'] ?? false));
 
         $post = SpacePost::query()->create([
             'space_id' => $space->id,
             'category' => $payload['category'],
+            'audience_type' => $audienceType,
             'author_membership_id' => $authorMembership->id,
             'created_by_system_admin_id' => $actor->id,
             'title' => trim($payload['title']),
@@ -84,13 +91,8 @@ class SystemAdminPostController extends ApiController
             'visible_from' => $payload['visibleFrom'] ?? null,
             'visible_to' => $payload['visibleTo'] ?? null,
         ]);
-
-        if ($recipient) {
-            SpacePostDelivery::query()->create([
-                'post_id' => $post->id,
-                'recipient_user_id' => $recipient->id,
-            ]);
-        }
+        $post->load('space');
+        $recipients = $audienceService->syncRecipients($post, $audienceType, $payload['recipientUserIds'] ?? []);
 
         if ($post->status === 'published' && $post->notify_members) {
             $this->queuePostNotification($post, $authorMembership);
@@ -106,7 +108,8 @@ class SystemAdminPostController extends ApiController
                 'spaceId' => $space->public_id,
                 'postId' => $post->public_id,
                 'category' => $post->category,
-                'recipientUserId' => $recipient?->public_id,
+                'audienceType' => $post->audience_type,
+                'recipientUserIds' => $recipients->pluck('public_id')->all(),
             ],
         );
 
@@ -114,7 +117,7 @@ class SystemAdminPostController extends ApiController
         $post->loadCount('reactions');
 
         return $this->ok([
-            'item' => $this->systemPostItem($post, $recipient),
+            'item' => $this->systemPostItem($post, $recipients->pluck('public_id')->all()),
         ], 201);
     }
 
@@ -123,6 +126,7 @@ class SystemAdminPostController extends ApiController
         SpacePost $post,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        PostAudienceService $audienceService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $post->loadMissing(['space', 'createdBySystemAdmin.user']);
@@ -132,19 +136,23 @@ class SystemAdminPostController extends ApiController
             'body' => ['sometimes', 'string'],
             'status' => ['sometimes', Rule::in(['draft', 'published', 'archived'])],
             'notifyMembers' => ['sometimes', 'boolean'],
+            'audienceType' => ['nullable', Rule::in(['all_members', 'targeted_users'])],
+            'recipientUserIds' => ['nullable', 'array'],
+            'recipientUserIds.*' => ['string', 'uuid'],
             'visibleFrom' => ['nullable', 'date'],
             'visibleTo' => ['nullable', 'date'],
-            'recipientUserId' => ['nullable', 'uuid'],
         ]);
+        $audienceType = $audienceService->normalizeAudienceType($payload['audienceType'] ?? $post->audience_type);
 
         if (array_key_exists('notifyMembers', $payload)) {
-            $payload['notifyMembers'] = $this->normalizeNotifyMembers($post->category, (bool) $payload['notifyMembers']);
+            $payload['notifyMembers'] = $audienceService->normalizeNotifyMembers($audienceType, (bool) $payload['notifyMembers']);
         }
 
         $post->fill([
             'title' => $payload['title'] ?? $post->title,
             'body' => $payload['body'] ?? $post->body,
             'status' => $payload['status'] ?? $post->status,
+            'audience_type' => $audienceType,
             'notify_members' => $payload['notifyMembers'] ?? $post->notify_members,
             'visible_from' => array_key_exists('visibleFrom', $payload) ? $payload['visibleFrom'] : $post->visible_from,
             'visible_to' => array_key_exists('visibleTo', $payload) ? $payload['visibleTo'] : $post->visible_to,
@@ -156,7 +164,11 @@ class SystemAdminPostController extends ApiController
 
         $post->save();
 
-        $recipient = $this->syncRecipient($post, $payload['recipientUserId'] ?? null);
+        $recipients = $audienceService->syncRecipients(
+            $post,
+            $audienceType,
+            $payload['recipientUserIds'] ?? $this->existingRecipientUserIds($post),
+        );
 
         $logger->log(
             $actor,
@@ -168,12 +180,16 @@ class SystemAdminPostController extends ApiController
                 'spaceId' => $post->space->public_id,
                 'postId' => $post->public_id,
                 'category' => $post->category,
-                'recipientUserId' => $recipient?->public_id,
+                'audienceType' => $post->audience_type,
+                'recipientUserIds' => $recipients->pluck('public_id')->all(),
             ],
         );
 
         return $this->ok([
-            'item' => $this->systemPostItem($post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']), $recipient),
+            'item' => $this->systemPostItem(
+                $post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']),
+                $recipients->pluck('public_id')->all(),
+            ),
         ]);
     }
 
@@ -182,6 +198,7 @@ class SystemAdminPostController extends ApiController
         SpacePost $post,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        PostAudienceService $audienceService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $post->loadMissing(['space', 'authorMembership']);
@@ -189,7 +206,7 @@ class SystemAdminPostController extends ApiController
             'notifyMembers' => ['nullable', 'boolean'],
         ]);
 
-        $notifyMembers = $this->normalizeNotifyMembers($post->category, (bool) ($payload['notifyMembers'] ?? false));
+        $notifyMembers = $audienceService->normalizeNotifyMembers($post->audience_type, (bool) ($payload['notifyMembers'] ?? false));
 
         $post->forceFill([
             'status' => 'published',
@@ -201,7 +218,7 @@ class SystemAdminPostController extends ApiController
             $this->queuePostNotification($post, $post->authorMembership);
         }
 
-        $recipient = $this->currentRecipient($post);
+        $recipientUserIds = $this->existingRecipientUserIds($post);
 
         $logger->log(
             $actor,
@@ -213,12 +230,16 @@ class SystemAdminPostController extends ApiController
                 'spaceId' => $post->space->public_id,
                 'postId' => $post->public_id,
                 'category' => $post->category,
-                'recipientUserId' => $recipient?->public_id,
+                'audienceType' => $post->audience_type,
+                'recipientUserIds' => $recipientUserIds,
             ],
         );
 
         return $this->ok([
-            'item' => $this->systemPostItem($post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']), $recipient),
+            'item' => $this->systemPostItem(
+                $post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']),
+                $recipientUserIds,
+            ),
         ]);
     }
 
@@ -231,7 +252,7 @@ class SystemAdminPostController extends ApiController
         $actor = $guard->actor($request->user());
         $post->loadMissing(['space']);
         $post->forceFill(['status' => 'archived'])->save();
-        $recipient = $this->currentRecipient($post);
+        $recipientUserIds = $this->existingRecipientUserIds($post);
 
         $logger->log(
             $actor,
@@ -247,7 +268,10 @@ class SystemAdminPostController extends ApiController
         );
 
         return $this->ok([
-            'item' => $this->systemPostItem($post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']), $recipient),
+            'item' => $this->systemPostItem(
+                $post->fresh(['space', 'authorMembership', 'createdBySystemAdmin.user']),
+                $recipientUserIds,
+            ),
         ]);
     }
 
@@ -294,76 +318,6 @@ class SystemAdminPostController extends ApiController
         return $membership;
     }
 
-    private function resolveRecipient(Space $space, string $category, ?string $recipientUserId): ?User
-    {
-        if ($category !== 'personal') {
-            return null;
-        }
-
-        if (! $recipientUserId) {
-            throw new ApiException('VALIDATION_ERROR', 'personal お知らせには recipientUserId が必要です。', 422, [
-                'field' => 'recipientUserId',
-            ]);
-        }
-
-        $recipient = User::query()->where('public_id', $recipientUserId)->first();
-        if (! $recipient) {
-            throw new ApiException('RESOURCE_NOT_FOUND', '対象ユーザーが見つかりません。', 404);
-        }
-
-        $membership = SpaceMembership::query()
-            ->where('space_id', $space->id)
-            ->where('user_id', $recipient->id)
-            ->where('status', 'active')
-            ->first();
-
-        if (! $membership) {
-            throw new ApiException('CONFLICT', 'active member のみ personal お知らせの対象にできます。', 409);
-        }
-
-        return $recipient;
-    }
-
-    private function normalizeNotifyMembers(string $category, bool $notifyMembers): bool
-    {
-        if ($category === 'personal' && $notifyMembers) {
-            throw new ApiException('VALIDATION_ERROR', 'personal お知らせでは notifyMembers を true にできません。', 422, [
-                'field' => 'notifyMembers',
-            ]);
-        }
-
-        return $category === 'personal' ? false : $notifyMembers;
-    }
-
-    private function syncRecipient(SpacePost $post, ?string $recipientUserId): ?User
-    {
-        if ($post->category !== 'personal') {
-            return null;
-        }
-
-        $recipient = $this->resolveRecipient($post->space, 'personal', $recipientUserId ?: $this->currentRecipient($post)?->public_id);
-
-        if (! $recipient) {
-            return null;
-        }
-
-        SpacePostDelivery::query()->updateOrCreate([
-            'post_id' => $post->id,
-        ], [
-            'recipient_user_id' => $recipient->id,
-        ]);
-
-        return $recipient;
-    }
-
-    private function currentRecipient(SpacePost $post): ?User
-    {
-        return SpacePostDelivery::query()
-            ->with('recipient')
-            ->where('post_id', $post->id)
-            ->first()?->recipient;
-    }
-
     private function queuePostNotification(SpacePost $post, SpaceMembership $authorMembership): void
     {
         SpaceNotification::query()->create([
@@ -378,27 +332,27 @@ class SystemAdminPostController extends ApiController
         ]);
     }
 
-    private function systemPostItems(Collection $posts): array
+    private function systemPostItems(Collection $posts, PostAudienceService $audienceService): array
     {
-        $deliveryMap = SpacePostDelivery::query()
-            ->with('recipient')
-            ->whereIn('post_id', $posts->pluck('id'))
-            ->get()
-            ->keyBy('post_id');
+        $recipientIdsByPost = $audienceService->recipientPublicIdsForPosts($posts);
 
         return $posts
-            ->map(fn (SpacePost $post) => $this->systemPostItem($post, $deliveryMap->get($post->id)?->recipient))
+            ->map(fn (SpacePost $post) => $this->systemPostItem($post, $recipientIdsByPost[$post->id] ?? []))
             ->all();
     }
 
-    private function systemPostItem(SpacePost $post, ?User $recipient = null): array
+    private function systemPostItem(SpacePost $post, array $recipientUserIds = []): array
     {
         return [
-            'post' => ApiResource::post($post),
-            'recipient' => $recipient ? ApiResource::user($recipient) : null,
+            'post' => ApiResource::post($post, recipientUserIds: $recipientUserIds),
             'createdBySystemAdmin' => $post->createdBySystemAdmin
                 ? ApiResource::systemAdmin($post->createdBySystemAdmin)
                 : null,
         ];
+    }
+
+    private function existingRecipientUserIds(SpacePost $post): array
+    {
+        return $post->deliveries()->with('recipient')->get()->map(fn ($delivery) => $delivery->recipient?->public_id)->filter()->values()->all();
     }
 }

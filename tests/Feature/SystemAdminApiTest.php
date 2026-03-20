@@ -166,7 +166,7 @@ class SystemAdminApiTest extends TestCase
             ->assertJsonPath('data.0.action', 'report_resolved');
     }
 
-    public function test_system_admin_can_manage_operation_and_personal_posts(): void
+    public function test_system_admin_can_manage_operation_posts_with_targeted_audience(): void
     {
         $this->seed();
 
@@ -183,6 +183,7 @@ class SystemAdminApiTest extends TestCase
 
         $operationCreated = $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
             'category' => 'operation',
+            'audienceType' => 'all_members',
             'title' => 'サービス運営からのお知らせ',
             'body' => 'operation category の確認です。',
             'status' => 'published',
@@ -191,37 +192,41 @@ class SystemAdminApiTest extends TestCase
             ->assertCreated()
             ->assertJsonPath('data.item.post.category', 'operation')
             ->assertJsonPath('data.item.post.notifyMembers', true)
-            ->assertJsonPath('data.item.recipient', null);
+            ->assertJsonPath('data.item.post.audienceType', 'all_members')
+            ->assertJsonPath('data.item.post.recipientUserIds', []);
 
         $operationPostId = $operationCreated->json('data.item.post.id');
 
-        $personalCreated = $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
-            'category' => 'personal',
+        $targetedOperationCreated = $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'operation',
+            'audienceType' => 'targeted_users',
             'title' => 'あなた宛のお知らせ',
-            'body' => 'personal category の確認です。',
+            'body' => 'targeted operation の確認です。',
             'status' => 'draft',
             'notifyMembers' => false,
-            'recipientUserId' => $guest->public_id,
+            'recipientUserIds' => [$guest->public_id],
         ])
             ->assertCreated()
-            ->assertJsonPath('data.item.post.category', 'personal')
-            ->assertJsonPath('data.item.recipient.id', $guest->public_id);
+            ->assertJsonPath('data.item.post.category', 'operation')
+            ->assertJsonPath('data.item.post.audienceType', 'targeted_users')
+            ->assertJsonPath('data.item.post.recipientUserIds.0', $guest->public_id);
 
-        $personalPostId = $personalCreated->json('data.item.post.id');
+        $targetedOperationPostId = $targetedOperationCreated->json('data.item.post.id');
 
-        $this->getJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts?category=personal')
+        $this->getJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts?category=operation')
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.post.id', $personalPostId)
-            ->assertJsonPath('data.0.recipient.id', $guest->public_id);
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.post.category', 'operation');
 
-        $this->patchJson('/api/v1/system-admin/posts/'.$personalPostId, [
+        $this->patchJson('/api/v1/system-admin/posts/'.$targetedOperationPostId, [
             'title' => 'あなた宛のお知らせ 改訂版',
+            'recipientUserIds' => [$guest->public_id],
         ])
             ->assertOk()
-            ->assertJsonPath('data.item.post.title', 'あなた宛のお知らせ 改訂版');
+            ->assertJsonPath('data.item.post.title', 'あなた宛のお知らせ 改訂版')
+            ->assertJsonPath('data.item.post.recipientUserIds.0', $guest->public_id);
 
-        $this->postJson('/api/v1/system-admin/posts/'.$personalPostId.'/publish', [
+        $this->postJson('/api/v1/system-admin/posts/'.$targetedOperationPostId.'/publish', [
             'notifyMembers' => false,
         ])
             ->assertOk()
@@ -235,8 +240,9 @@ class SystemAdminApiTest extends TestCase
             ->assertNoContent();
 
         $this->assertDatabaseHas('space_posts', [
-            'public_id' => $personalPostId,
-            'category' => 'personal',
+            'public_id' => $targetedOperationPostId,
+            'category' => 'operation',
+            'audience_type' => 'targeted_users',
             'status' => 'published',
         ]);
 
@@ -248,8 +254,20 @@ class SystemAdminApiTest extends TestCase
 
         $this->assertDatabaseHas('space_post_deliveries', [
             'recipient_user_id' => $guest->id,
-            'post_id' => SpacePost::query()->where('public_id', $personalPostId)->firstOrFail()->id,
+            'post_id' => SpacePost::query()->where('public_id', $targetedOperationPostId)->firstOrFail()->id,
         ]);
+
+        $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'operation',
+            'audienceType' => 'targeted_users',
+            'title' => '不正な通知設定',
+            'body' => 'targeted に notify は不可',
+            'status' => 'draft',
+            'notifyMembers' => true,
+            'recipientUserIds' => [$guest->public_id],
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
     }
 
     private function systemAdminUser(): User

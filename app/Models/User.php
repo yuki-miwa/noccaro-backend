@@ -56,9 +56,14 @@ class User extends Authenticatable
         return $this->hasMany(SpacePostRead::class);
     }
 
-    public function personalPostDeliveries(): HasMany
+    public function targetedPostDeliveries(): HasMany
     {
         return $this->hasMany(SpacePostDelivery::class, 'recipient_user_id');
+    }
+
+    public function personalPostDeliveries(): HasMany
+    {
+        return $this->targetedPostDeliveries();
     }
 
     public function createdSpaces(): HasMany

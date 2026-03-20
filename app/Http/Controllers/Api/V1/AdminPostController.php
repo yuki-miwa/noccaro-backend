@@ -9,6 +9,7 @@ use App\Models\SpacePostReaction;
 use App\Support\Admin\MemberActionLogger;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Posts\PostAudienceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -20,23 +21,33 @@ class AdminPostController extends ApiController
         Request $request,
         SpacePost $post,
         SpaceAdminGuard $guard,
+        PostAudienceService $audienceService,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
         $this->assertOwnerCategory($post);
+        $post->loadMissing('space');
         $payload = $request->validate([
             'title' => ['sometimes', 'string', 'min:1', 'max:200'],
             'body' => ['sometimes', 'string'],
             'status' => ['sometimes', Rule::in(['draft', 'published', 'archived'])],
             'notifyMembers' => ['sometimes', 'boolean'],
+            'audienceType' => ['nullable', Rule::in(['all_members', 'targeted_users'])],
+            'recipientUserIds' => ['nullable', 'array'],
+            'recipientUserIds.*' => ['string', 'uuid'],
             'visibleFrom' => ['nullable', 'date'],
             'visibleTo' => ['nullable', 'date'],
         ]);
+        $audienceType = $audienceService->normalizeAudienceType($payload['audienceType'] ?? $post->audience_type);
+        $notifyMembers = array_key_exists('notifyMembers', $payload)
+            ? $audienceService->normalizeNotifyMembers($audienceType, (bool) $payload['notifyMembers'])
+            : $post->notify_members;
 
         $post->fill([
             'title' => $payload['title'] ?? $post->title,
             'body' => $payload['body'] ?? $post->body,
             'status' => $payload['status'] ?? $post->status,
-            'notify_members' => $payload['notifyMembers'] ?? $post->notify_members,
+            'audience_type' => $audienceType,
+            'notify_members' => $notifyMembers,
             'visible_from' => array_key_exists('visibleFrom', $payload) ? $payload['visibleFrom'] : $post->visible_from,
             'visible_to' => array_key_exists('visibleTo', $payload) ? $payload['visibleTo'] : $post->visible_to,
         ]);
@@ -46,9 +57,18 @@ class AdminPostController extends ApiController
         }
 
         $post->save();
+        $recipients = $audienceService->syncRecipients(
+            $post,
+            $audienceType,
+            $payload['recipientUserIds'] ?? $this->existingRecipientUserIds($post),
+        );
 
         return $this->ok([
-            'post' => $this->postPayload($post->fresh(['space', 'authorMembership']), $actor->id),
+            'post' => $this->postPayload(
+                $post->fresh(['space', 'authorMembership']),
+                $actor->id,
+                $recipients->pluck('public_id')->all(),
+            ),
         ]);
     }
 
@@ -56,16 +76,18 @@ class AdminPostController extends ApiController
         Request $request,
         SpacePost $post,
         SpaceAdminGuard $guard,
+        PostAudienceService $audienceService,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
         $this->assertOwnerCategory($post);
         $payload = $request->validate([
             'notifyMembers' => ['nullable', 'boolean'],
         ]);
+        $notifyMembers = $audienceService->normalizeNotifyMembers($post->audience_type, (bool) ($payload['notifyMembers'] ?? false));
 
         $post->forceFill([
             'status' => 'published',
-            'notify_members' => (bool) ($payload['notifyMembers'] ?? false),
+            'notify_members' => $notifyMembers,
             'published_at' => $post->published_at ?? now(),
         ])->save();
 
@@ -83,7 +105,11 @@ class AdminPostController extends ApiController
         }
 
         return $this->ok([
-            'post' => $this->postPayload($post->fresh(['space', 'authorMembership']), $actor->id),
+            'post' => $this->postPayload(
+                $post->fresh(['space', 'authorMembership']),
+                $actor->id,
+                $this->existingRecipientUserIds($post),
+            ),
         ]);
     }
 
@@ -94,7 +120,11 @@ class AdminPostController extends ApiController
         $post->forceFill(['status' => 'archived'])->save();
 
         return $this->ok([
-            'post' => $this->postPayload($post->fresh(['space', 'authorMembership']), $actor->id),
+            'post' => $this->postPayload(
+                $post->fresh(['space', 'authorMembership']),
+                $actor->id,
+                $this->existingRecipientUserIds($post),
+            ),
         ]);
     }
 
@@ -118,7 +148,7 @@ class AdminPostController extends ApiController
         return $this->noContent();
     }
 
-    private function postPayload(SpacePost $post, int $actorMembershipId): array
+    private function postPayload(SpacePost $post, int $actorMembershipId, array $recipientUserIds = []): array
     {
         $post->loadCount('reactions');
         $reactedByMe = SpacePostReaction::query()
@@ -126,7 +156,7 @@ class AdminPostController extends ApiController
             ->where('membership_id', $actorMembershipId)
             ->exists();
 
-        return ApiResource::post($post, $reactedByMe);
+        return ApiResource::post($post, reactedByMe: $reactedByMe, recipientUserIds: $recipientUserIds);
     }
 
     private function assertOwnerCategory(SpacePost $post): void
@@ -134,5 +164,10 @@ class AdminPostController extends ApiController
         if ($post->category !== 'owner') {
             throw new ApiException('FORBIDDEN', 'owner カテゴリ以外はこの API では管理できません。', 403);
         }
+    }
+
+    private function existingRecipientUserIds(SpacePost $post): array
+    {
+        return $post->deliveries()->with('recipient')->get()->map(fn ($delivery) => $delivery->recipient?->public_id)->filter()->values()->all();
     }
 }

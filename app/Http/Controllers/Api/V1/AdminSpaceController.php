@@ -11,6 +11,7 @@ use App\Models\SpacePost;
 use App\Models\SpacePostReaction;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Posts\PostAudienceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -126,8 +127,12 @@ class AdminSpaceController extends ApiController
         );
     }
 
-    public function posts(Request $request, Space $space, SpaceAdminGuard $guard): JsonResponse
-    {
+    public function posts(
+        Request $request,
+        Space $space,
+        SpaceAdminGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $actor = $guard->actorForSpace($request->user(), $space);
         $payload = $request->validate([
             'category' => ['nullable', Rule::in(['owner'])],
@@ -147,10 +152,16 @@ class AdminSpaceController extends ApiController
             ->whereIn('post_id', $posts->pluck('id'))
             ->pluck('post_id')
             ->all();
+        $recipientIdsByPost = $audienceService->recipientPublicIdsForPosts($posts);
 
         return $this->collection(
             $posts->map(
-                fn (SpacePost $post) => ApiResource::post($post, in_array($post->id, $reactedIds, true))
+                fn (SpacePost $post) => ApiResource::post(
+                    $post,
+                    reactedByMe: in_array($post->id, $reactedIds, true),
+                    targetedToMe: false,
+                    recipientUserIds: $recipientIdsByPost[$post->id] ?? [],
+                )
             )->all(),
             [
                 'hasMore' => false,
@@ -160,12 +171,19 @@ class AdminSpaceController extends ApiController
         );
     }
 
-    public function createPost(Request $request, Space $space, SpaceAdminGuard $guard): JsonResponse
-    {
+    public function createPost(
+        Request $request,
+        Space $space,
+        SpaceAdminGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $actor = $guard->actorForSpace($request->user(), $space);
 
         $payload = $request->validate([
             'category' => ['nullable', Rule::in(['owner'])],
+            'audienceType' => ['nullable', Rule::in(['all_members', 'targeted_users'])],
+            'recipientUserIds' => ['nullable', 'array'],
+            'recipientUserIds.*' => ['string', 'uuid'],
             'title' => ['required', 'string', 'min:1', 'max:200'],
             'body' => ['required', 'string'],
             'status' => ['required', Rule::in(['draft', 'published', 'archived'])],
@@ -173,19 +191,24 @@ class AdminSpaceController extends ApiController
             'visibleFrom' => ['nullable', 'date'],
             'visibleTo' => ['nullable', 'date'],
         ]);
+        $audienceType = $audienceService->normalizeAudienceType($payload['audienceType'] ?? null);
+        $notifyMembers = $audienceService->normalizeNotifyMembers($audienceType, (bool) ($payload['notifyMembers'] ?? false));
 
         $post = SpacePost::query()->create([
             'space_id' => $space->id,
             'category' => $payload['category'] ?? 'owner',
+            'audience_type' => $audienceType,
             'author_membership_id' => $actor->id,
             'title' => trim($payload['title']),
             'body' => $payload['body'],
             'status' => $payload['status'],
-            'notify_members' => (bool) ($payload['notifyMembers'] ?? false),
+            'notify_members' => $notifyMembers,
             'published_at' => $payload['status'] === 'published' ? now() : null,
             'visible_from' => $payload['visibleFrom'] ?? null,
             'visible_to' => $payload['visibleTo'] ?? null,
         ]);
+        $post->load('space');
+        $recipients = $audienceService->syncRecipients($post, $audienceType, $payload['recipientUserIds'] ?? []);
 
         if ($post->status === 'published' && $post->notify_members) {
             $this->queuePostNotification($post, $actor);
@@ -195,7 +218,7 @@ class AdminSpaceController extends ApiController
         $post->loadCount('reactions');
 
         return $this->ok([
-            'post' => ApiResource::post($post),
+            'post' => ApiResource::post($post, recipientUserIds: $recipients->pluck('public_id')->all()),
         ], 201);
     }
 

@@ -9,6 +9,7 @@ use App\Models\SpacePostDelivery;
 use App\Models\SpacePostReaction;
 use App\Models\SpacePostRead;
 use App\Support\Api\ApiResource;
+use App\Support\Posts\PostAudienceService;
 use App\Support\Spaces\MembershipGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -16,11 +17,15 @@ use Illuminate\Validation\Rule;
 
 class PostController extends ApiController
 {
-    public function index(Request $request, Space $space, MembershipGuard $guard): JsonResponse
-    {
+    public function index(
+        Request $request,
+        Space $space,
+        MembershipGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $membership = $guard->requireActiveMembership($request->user(), $space);
         $payload = $request->validate([
-            'category' => ['nullable', Rule::in(['owner', 'operation', 'personal'])],
+            'category' => ['nullable', Rule::in(['owner', 'operation'])],
             'limit' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
         $limit = (int) ($request->integer('limit') ?: 20);
@@ -33,11 +38,17 @@ class PostController extends ApiController
             ->where('category', $category)
             ->publishedVisible();
 
-        if ($category === 'personal') {
-            $query->whereHas('deliveries', function ($deliveryQuery) use ($request): void {
-                $deliveryQuery->where('recipient_user_id', $request->user()->id);
-            });
-        }
+        $query->where(function ($visibilityQuery) use ($request): void {
+            $visibilityQuery
+                ->where('audience_type', 'all_members')
+                ->orWhere(function ($targetedQuery) use ($request): void {
+                    $targetedQuery
+                        ->where('audience_type', 'targeted_users')
+                        ->whereHas('deliveries', function ($deliveryQuery) use ($request): void {
+                            $deliveryQuery->where('recipient_user_id', $request->user()->id);
+                        });
+                });
+        });
 
         $posts = $query
             ->orderByDesc('published_at')
@@ -54,6 +65,11 @@ class PostController extends ApiController
             ->whereIn('post_id', $posts->pluck('id'))
             ->get()
             ->keyBy('post_id');
+        $targetedPostIds = SpacePostDelivery::query()
+            ->where('recipient_user_id', $request->user()->id)
+            ->whereIn('post_id', $posts->pluck('id'))
+            ->pluck('post_id')
+            ->all();
 
         return $this->collection(
             $posts->map(
@@ -62,6 +78,7 @@ class PostController extends ApiController
                     reactedByMe: in_array($post->id, $reactedIds, true),
                     isRead: $readMap->has($post->id),
                     readAt: ApiResource::iso($readMap->get($post->id)?->read_at),
+                    targetedToMe: in_array($post->id, $targetedPostIds, true),
                 )
             )->all(),
             [
@@ -73,10 +90,14 @@ class PostController extends ApiController
         );
     }
 
-    public function show(Request $request, SpacePost $post, MembershipGuard $guard): JsonResponse
-    {
+    public function show(
+        Request $request,
+        SpacePost $post,
+        MembershipGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $post->loadMissing(['space', 'authorMembership']);
-        $membership = $this->authorizeVisiblePost($request, $post, $guard);
+        $membership = $this->authorizeVisiblePost($request, $post, $guard, $audienceService);
         $post->loadCount('reactions');
         $reactedByMe = SpacePostReaction::query()
             ->where('post_id', $post->id)
@@ -93,19 +114,24 @@ class PostController extends ApiController
                 reactedByMe: $reactedByMe,
                 isRead: $read !== null,
                 readAt: ApiResource::iso($read?->read_at),
+                targetedToMe: $post->audience_type === 'targeted_users',
             ),
         ]);
     }
 
-    public function reaction(Request $request, SpacePost $post, MembershipGuard $guard): JsonResponse
-    {
+    public function reaction(
+        Request $request,
+        SpacePost $post,
+        MembershipGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
         $payload = $request->validate([
             'reactionType' => ['required', 'in:like'],
             'enabled' => ['required', 'boolean'],
         ]);
 
         $post->loadMissing(['space']);
-        $membership = $this->authorizeVisiblePost($request, $post, $guard);
+        $membership = $this->authorizeVisiblePost($request, $post, $guard, $audienceService);
 
         if ($payload['enabled']) {
             SpacePostReaction::query()->firstOrCreate([
@@ -131,9 +157,13 @@ class PostController extends ApiController
         ]);
     }
 
-    public function read(Request $request, SpacePost $post, MembershipGuard $guard): JsonResponse
-    {
-        $this->authorizeVisiblePost($request, $post, $guard);
+    public function read(
+        Request $request,
+        SpacePost $post,
+        MembershipGuard $guard,
+        PostAudienceService $audienceService,
+    ): JsonResponse {
+        $this->authorizeVisiblePost($request, $post, $guard, $audienceService);
 
         $existingRead = SpacePostRead::query()
             ->where('post_id', $post->id)
@@ -170,19 +200,13 @@ class PostController extends ApiController
         Request $request,
         SpacePost $post,
         MembershipGuard $guard,
+        PostAudienceService $audienceService,
     ) {
         $this->assertPublished($post);
         $membership = $guard->requireActiveMembership($request->user(), $post->space);
 
-        if ($post->category === 'personal') {
-            $delivered = SpacePostDelivery::query()
-                ->where('post_id', $post->id)
-                ->where('recipient_user_id', $request->user()->id)
-                ->exists();
-
-            if (! $delivered) {
-                throw new ApiException('RESOURCE_NOT_FOUND', '記事が見つかりません。', 404);
-            }
+        if (! $audienceService->isVisibleToUser($post, $request->user())) {
+            throw new ApiException('RESOURCE_NOT_FOUND', '記事が見つかりません。', 404);
         }
 
         return $membership;

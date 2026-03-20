@@ -76,7 +76,9 @@ class PublicApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.0.title', '最初のお知らせ')
             ->assertJsonPath('data.0.category', 'owner')
+            ->assertJsonPath('data.0.audienceType', 'all_members')
             ->assertJsonPath('data.0.isRead', false)
+            ->assertJsonPath('data.0.targetedToMe', false)
             ->assertJsonPath('data.0.reactedByMe', false);
 
         $this->putJson('/api/v1/posts/'.$postId.'/reaction', [
@@ -88,7 +90,7 @@ class PublicApiTest extends TestCase
             ->assertJsonPath('data.reactionCount', 1);
     }
 
-    public function test_posts_support_category_filters_and_read_state(): void
+    public function test_posts_support_category_filters_targeting_and_read_state(): void
     {
         $this->seed();
         $guest = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
@@ -102,6 +104,7 @@ class PublicApiTest extends TestCase
         $operationPost = SpacePost::query()->create([
             'space_id' => $space->id,
             'category' => 'operation',
+            'audience_type' => 'all_members',
             'author_membership_id' => $ownerMembership->id,
             'title' => '運営からのお知らせ',
             'body' => 'operation category の確認用です。',
@@ -109,18 +112,19 @@ class PublicApiTest extends TestCase
             'published_at' => now()->subMinutes(10),
         ]);
 
-        $personalPost = SpacePost::query()->create([
+        $targetedOwnerPost = SpacePost::query()->create([
             'space_id' => $space->id,
-            'category' => 'personal',
+            'category' => 'owner',
+            'audience_type' => 'targeted_users',
             'author_membership_id' => $ownerMembership->id,
             'title' => 'あなた宛のお知らせ',
-            'body' => 'personal category の確認用です。',
+            'body' => 'targeted owner の確認用です。',
             'status' => 'published',
             'published_at' => now()->subMinutes(5),
         ]);
 
         SpacePostDelivery::query()->create([
-            'post_id' => $personalPost->id,
+            'post_id' => $targetedOwnerPost->id,
             'recipient_user_id' => $guest->id,
         ]);
 
@@ -128,49 +132,53 @@ class PublicApiTest extends TestCase
 
         $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts')
             ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.category', 'owner');
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.0.id', $targetedOwnerPost->public_id)
+            ->assertJsonPath('data.0.category', 'owner')
+            ->assertJsonPath('data.0.audienceType', 'targeted_users')
+            ->assertJsonPath('data.0.targetedToMe', true)
+            ->assertJsonPath('data.0.isRead', false)
+            ->assertJsonPath('data.0.readAt', null);
 
         $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts?category=operation')
             ->assertOk()
             ->assertJsonCount(1, 'data')
             ->assertJsonPath('data.0.id', $operationPost->public_id)
-            ->assertJsonPath('data.0.category', 'operation');
+            ->assertJsonPath('data.0.category', 'operation')
+            ->assertJsonPath('data.0.targetedToMe', false);
 
         $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts?category=personal')
-            ->assertOk()
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.id', $personalPost->public_id)
-            ->assertJsonPath('data.0.category', 'personal')
-            ->assertJsonPath('data.0.isRead', false)
-            ->assertJsonPath('data.0.readAt', null);
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
 
-        $detail = $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+        $detail = $this->getJson('/api/v1/posts/'.$targetedOwnerPost->public_id)
             ->assertOk()
-            ->assertJsonPath('data.post.category', 'personal')
+            ->assertJsonPath('data.post.category', 'owner')
+            ->assertJsonPath('data.post.audienceType', 'targeted_users')
+            ->assertJsonPath('data.post.targetedToMe', true)
             ->assertJsonPath('data.post.isRead', false)
             ->assertJsonPath('data.post.readAt', null);
 
-        $firstRead = $this->postJson('/api/v1/posts/'.$personalPost->public_id.'/read')
+        $firstRead = $this->postJson('/api/v1/posts/'.$targetedOwnerPost->public_id.'/read')
             ->assertOk()
-            ->assertJsonPath('data.postId', $personalPost->public_id)
+            ->assertJsonPath('data.postId', $targetedOwnerPost->public_id)
             ->assertJsonPath('data.isRead', true);
 
         $readAt = $firstRead->json('data.readAt');
 
-        $this->postJson('/api/v1/posts/'.$personalPost->public_id.'/read')
+        $this->postJson('/api/v1/posts/'.$targetedOwnerPost->public_id.'/read')
             ->assertOk()
             ->assertJsonPath('data.isRead', true)
             ->assertJsonPath('data.readAt', $readAt);
 
-        $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+        $this->getJson('/api/v1/posts/'.$targetedOwnerPost->public_id)
             ->assertOk()
             ->assertJsonPath('data.post.isRead', true)
             ->assertJsonPath('data.post.readAt', $readAt);
 
         Sanctum::actingAs($owner);
 
-        $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+        $this->getJson('/api/v1/posts/'.$targetedOwnerPost->public_id)
             ->assertStatus(404)
             ->assertJsonPath('error.code', 'RESOURCE_NOT_FOUND');
     }

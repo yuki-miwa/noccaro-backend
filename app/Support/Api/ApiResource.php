@@ -83,12 +83,15 @@ class ApiResource
         ?int $reactionCount = null,
         bool $isRead = false,
         ?string $readAt = null,
+        bool $targetedToMe = false,
+        ?array $recipientUserIds = null,
     ): array {
-        return [
+        $payload = [
             'id' => $post->public_id,
             'spaceId' => $post->space?->public_id,
             'authorMembershipId' => $post->authorMembership?->public_id,
             'category' => $post->category,
+            'audienceType' => $post->audience_type,
             'title' => $post->title,
             'body' => $post->body,
             'status' => $post->status,
@@ -100,9 +103,16 @@ class ApiResource
             'reactedByMe' => $reactedByMe,
             'isRead' => $isRead,
             'readAt' => $readAt,
+            'targetedToMe' => $targetedToMe,
             'createdAt' => self::iso($post->created_at),
             'updatedAt' => self::iso($post->updated_at),
         ];
+
+        if ($recipientUserIds !== null) {
+            $payload['recipientUserIds'] = $recipientUserIds;
+        }
+
+        return $payload;
     }
 
     public static function whisper(MapWhisper $whisper): array
