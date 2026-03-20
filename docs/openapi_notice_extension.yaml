@@ -1,0 +1,222 @@
+openapi: 3.0.3
+info:
+  title: Noccaro Notice Extension Draft
+  version: 0.1.0
+servers:
+  - url: https://noccaro.duckdns.org/api/v1
+paths:
+  /spaces/{spaceId}/posts:
+    get:
+      summary: List notice posts for a space
+      parameters:
+        - in: path
+          name: spaceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: category
+          required: false
+          schema:
+            type: string
+            enum: [owner, operation, personal]
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Post'
+                  meta:
+                    type: object
+                    properties:
+                      hasMore:
+                        type: boolean
+                      nextCursor:
+                        nullable: true
+                        type: string
+                      limit:
+                        type: integer
+                      category:
+                        type: string
+  /posts/{postId}:
+    get:
+      summary: Get post detail
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      post:
+                        $ref: '#/components/schemas/Post'
+  /posts/{postId}/read:
+    post:
+      summary: Mark post as read
+      parameters:
+        - in: path
+          name: postId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      postId:
+                        type: string
+                        format: uuid
+                      isRead:
+                        type: boolean
+                      readAt:
+                        type: string
+                        format: date-time
+  /system-admin/spaces/{spaceId}/posts:
+    get:
+      summary: List system-admin managed posts in a space
+      parameters:
+        - in: path
+          name: spaceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - in: query
+          name: category
+          required: false
+          schema:
+            type: string
+            enum: [all, owner, operation, personal]
+      responses:
+        '200':
+          description: OK
+    post:
+      summary: Create operation or personal notice
+      parameters:
+        - in: path
+          name: spaceId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, title, body, status]
+              properties:
+                category:
+                  type: string
+                  enum: [operation, personal]
+                title:
+                  type: string
+                body:
+                  type: string
+                status:
+                  type: string
+                  enum: [draft, published, archived]
+                notifyMembers:
+                  type: boolean
+                visibleFrom:
+                  nullable: true
+                  type: string
+                  format: date-time
+                visibleTo:
+                  nullable: true
+                  type: string
+                  format: date-time
+                recipientUserId:
+                  nullable: true
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Created
+components:
+  schemas:
+    Post:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        spaceId:
+          type: string
+          format: uuid
+        authorMembershipId:
+          nullable: true
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [owner, operation, personal]
+        title:
+          type: string
+        body:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, archived, deleted]
+        notifyMembers:
+          type: boolean
+        publishedAt:
+          nullable: true
+          type: string
+          format: date-time
+        visibleFrom:
+          nullable: true
+          type: string
+          format: date-time
+        visibleTo:
+          nullable: true
+          type: string
+          format: date-time
+        reactionCount:
+          type: integer
+        reactedByMe:
+          type: boolean
+        isRead:
+          type: boolean
+        readAt:
+          nullable: true
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
