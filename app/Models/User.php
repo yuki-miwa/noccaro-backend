@@ -51,6 +51,16 @@ class User extends Authenticatable
         return $this->hasMany(UserPushDevice::class);
     }
 
+    public function postReads(): HasMany
+    {
+        return $this->hasMany(SpacePostRead::class);
+    }
+
+    public function personalPostDeliveries(): HasMany
+    {
+        return $this->hasMany(SpacePostDelivery::class, 'recipient_user_id');
+    }
+
     public function createdSpaces(): HasMany
     {
         return $this->hasMany(Space::class, 'created_by_user_id');

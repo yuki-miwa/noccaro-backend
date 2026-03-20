@@ -129,11 +129,16 @@ class AdminSpaceController extends ApiController
     public function posts(Request $request, Space $space, SpaceAdminGuard $guard): JsonResponse
     {
         $actor = $guard->actorForSpace($request->user(), $space);
+        $payload = $request->validate([
+            'category' => ['nullable', Rule::in(['owner'])],
+        ]);
+        $category = $payload['category'] ?? 'owner';
 
         $posts = SpacePost::query()
             ->with(['space', 'authorMembership'])
             ->withCount('reactions')
             ->where('space_id', $space->id)
+            ->where('category', $category)
             ->orderByDesc('updated_at')
             ->get();
 
@@ -150,6 +155,7 @@ class AdminSpaceController extends ApiController
             [
                 'hasMore' => false,
                 'nextCursor' => null,
+                'category' => $category,
             ],
         );
     }
@@ -159,6 +165,7 @@ class AdminSpaceController extends ApiController
         $actor = $guard->actorForSpace($request->user(), $space);
 
         $payload = $request->validate([
+            'category' => ['nullable', Rule::in(['owner'])],
             'title' => ['required', 'string', 'min:1', 'max:200'],
             'body' => ['required', 'string'],
             'status' => ['required', Rule::in(['draft', 'published', 'archived'])],
@@ -169,6 +176,7 @@ class AdminSpaceController extends ApiController
 
         $post = SpacePost::query()->create([
             'space_id' => $space->id,
+            'category' => $payload['category'] ?? 'owner',
             'author_membership_id' => $actor->id,
             'title' => trim($payload['title']),
             'body' => $payload['body'],

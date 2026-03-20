@@ -3,6 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Space;
+use App\Models\SpaceMembership;
+use App\Models\SpacePost;
+use App\Models\SpacePostDelivery;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -72,6 +75,8 @@ class PublicApiTest extends TestCase
         $postsResponse
             ->assertOk()
             ->assertJsonPath('data.0.title', '最初のお知らせ')
+            ->assertJsonPath('data.0.category', 'owner')
+            ->assertJsonPath('data.0.isRead', false)
             ->assertJsonPath('data.0.reactedByMe', false);
 
         $this->putJson('/api/v1/posts/'.$postId.'/reaction', [
@@ -81,6 +86,93 @@ class PublicApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.reactedByMe', true)
             ->assertJsonPath('data.reactionCount', 1);
+    }
+
+    public function test_posts_support_category_filters_and_read_state(): void
+    {
+        $this->seed();
+        $guest = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
+        $owner = User::query()->where('email', 'owner@noccaro.local')->firstOrFail();
+        $space = Space::query()->where('space_code', 'NOC2026')->firstOrFail();
+        $ownerMembership = SpaceMembership::query()
+            ->where('space_id', $space->id)
+            ->where('user_id', $owner->id)
+            ->firstOrFail();
+
+        $operationPost = SpacePost::query()->create([
+            'space_id' => $space->id,
+            'category' => 'operation',
+            'author_membership_id' => $ownerMembership->id,
+            'title' => '運営からのお知らせ',
+            'body' => 'operation category の確認用です。',
+            'status' => 'published',
+            'published_at' => now()->subMinutes(10),
+        ]);
+
+        $personalPost = SpacePost::query()->create([
+            'space_id' => $space->id,
+            'category' => 'personal',
+            'author_membership_id' => $ownerMembership->id,
+            'title' => 'あなた宛のお知らせ',
+            'body' => 'personal category の確認用です。',
+            'status' => 'published',
+            'published_at' => now()->subMinutes(5),
+        ]);
+
+        SpacePostDelivery::query()->create([
+            'post_id' => $personalPost->id,
+            'recipient_user_id' => $guest->id,
+        ]);
+
+        Sanctum::actingAs($guest);
+
+        $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.category', 'owner');
+
+        $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts?category=operation')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $operationPost->public_id)
+            ->assertJsonPath('data.0.category', 'operation');
+
+        $this->getJson('/api/v1/spaces/'.$space->public_id.'/posts?category=personal')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $personalPost->public_id)
+            ->assertJsonPath('data.0.category', 'personal')
+            ->assertJsonPath('data.0.isRead', false)
+            ->assertJsonPath('data.0.readAt', null);
+
+        $detail = $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+            ->assertOk()
+            ->assertJsonPath('data.post.category', 'personal')
+            ->assertJsonPath('data.post.isRead', false)
+            ->assertJsonPath('data.post.readAt', null);
+
+        $firstRead = $this->postJson('/api/v1/posts/'.$personalPost->public_id.'/read')
+            ->assertOk()
+            ->assertJsonPath('data.postId', $personalPost->public_id)
+            ->assertJsonPath('data.isRead', true);
+
+        $readAt = $firstRead->json('data.readAt');
+
+        $this->postJson('/api/v1/posts/'.$personalPost->public_id.'/read')
+            ->assertOk()
+            ->assertJsonPath('data.isRead', true)
+            ->assertJsonPath('data.readAt', $readAt);
+
+        $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+            ->assertOk()
+            ->assertJsonPath('data.post.isRead', true)
+            ->assertJsonPath('data.post.readAt', $readAt);
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/v1/posts/'.$personalPost->public_id)
+            ->assertStatus(404)
+            ->assertJsonPath('error.code', 'RESOURCE_NOT_FOUND');
     }
 
     public function test_active_member_can_report_whisper_and_auto_hide_at_threshold(): void

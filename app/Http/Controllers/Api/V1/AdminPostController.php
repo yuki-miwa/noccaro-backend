@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\ApiException;
 use App\Models\SpaceNotification;
 use App\Models\SpacePost;
 use App\Models\SpacePostReaction;
@@ -21,6 +22,7 @@ class AdminPostController extends ApiController
         SpaceAdminGuard $guard,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
+        $this->assertOwnerCategory($post);
         $payload = $request->validate([
             'title' => ['sometimes', 'string', 'min:1', 'max:200'],
             'body' => ['sometimes', 'string'],
@@ -56,6 +58,7 @@ class AdminPostController extends ApiController
         SpaceAdminGuard $guard,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
+        $this->assertOwnerCategory($post);
         $payload = $request->validate([
             'notifyMembers' => ['nullable', 'boolean'],
         ]);
@@ -87,6 +90,7 @@ class AdminPostController extends ApiController
     public function archive(Request $request, SpacePost $post, SpaceAdminGuard $guard): JsonResponse
     {
         $actor = $guard->actorForPost($request->user(), $post);
+        $this->assertOwnerCategory($post);
         $post->forceFill(['status' => 'archived'])->save();
 
         return $this->ok([
@@ -101,6 +105,7 @@ class AdminPostController extends ApiController
         MemberActionLogger $logger,
     ): Response {
         $actor = $guard->actorForPost($request->user(), $post);
+        $this->assertOwnerCategory($post);
         $post->loadMissing(['authorMembership']);
 
         $post->forceFill(['status' => 'deleted'])->save();
@@ -122,5 +127,12 @@ class AdminPostController extends ApiController
             ->exists();
 
         return ApiResource::post($post, $reactedByMe);
+    }
+
+    private function assertOwnerCategory(SpacePost $post): void
+    {
+        if ($post->category !== 'owner') {
+            throw new ApiException('FORBIDDEN', 'owner カテゴリ以外はこの API では管理できません。', 403);
+        }
     }
 }

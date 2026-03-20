@@ -77,12 +77,18 @@ class ApiResource
         ];
     }
 
-    public static function post(SpacePost $post, bool $reactedByMe = false, ?int $reactionCount = null): array
-    {
+    public static function post(
+        SpacePost $post,
+        bool $reactedByMe = false,
+        ?int $reactionCount = null,
+        bool $isRead = false,
+        ?string $readAt = null,
+    ): array {
         return [
             'id' => $post->public_id,
             'spaceId' => $post->space?->public_id,
             'authorMembershipId' => $post->authorMembership?->public_id,
+            'category' => $post->category,
             'title' => $post->title,
             'body' => $post->body,
             'status' => $post->status,
@@ -92,6 +98,8 @@ class ApiResource
             'visibleTo' => self::iso($post->visible_to),
             'reactionCount' => $reactionCount ?? ($post->reactions_count ?? 0),
             'reactedByMe' => $reactedByMe,
+            'isRead' => $isRead,
+            'readAt' => $readAt,
             'createdAt' => self::iso($post->created_at),
             'updatedAt' => self::iso($post->updated_at),
         ];
@@ -362,7 +370,7 @@ class ApiResource
         return sprintf('%s:%s', $device->platform, substr(sha1($device->push_token), 0, 24));
     }
 
-    private static function iso(mixed $value): ?string
+    public static function iso(mixed $value): ?string
     {
         if ($value === null) {
             return null;

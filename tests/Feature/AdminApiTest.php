@@ -149,6 +149,7 @@ class AdminApiTest extends TestCase
             ->assertJsonCount(1, 'data');
 
         $created = $this->postJson('/api/v1/admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'owner',
             'title' => '運営メモ',
             'body' => 'これは draft 記事です。',
             'status' => 'draft',
@@ -157,6 +158,7 @@ class AdminApiTest extends TestCase
             'visibleTo' => null,
         ])
             ->assertCreated()
+            ->assertJsonPath('data.post.category', 'owner')
             ->assertJsonPath('data.post.status', 'draft');
 
         $postId = $created->json('data.post.id');
@@ -200,6 +202,15 @@ class AdminApiTest extends TestCase
         $this->assertSoftDeleted('space_posts', [
             'public_id' => $postId,
         ]);
+
+        $this->postJson('/api/v1/admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'operation',
+            'title' => '不正なカテゴリ',
+            'body' => 'owner admin では作れない',
+            'status' => 'draft',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
     }
 
     public function test_owner_can_resolve_reports_and_remove_whispers(): void

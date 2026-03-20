@@ -6,6 +6,7 @@ use App\Models\ContentReport;
 use App\Models\MapWhisper;
 use App\Models\Space;
 use App\Models\SpaceMembership;
+use App\Models\SpacePost;
 use App\Models\SystemAdmin;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -163,6 +164,92 @@ class SystemAdminApiTest extends TestCase
         $this->getJson('/api/v1/system-admin/audit-logs')
             ->assertOk()
             ->assertJsonPath('data.0.action', 'report_resolved');
+    }
+
+    public function test_system_admin_can_manage_operation_and_personal_posts(): void
+    {
+        $this->seed();
+
+        $adminUser = $this->systemAdminUser();
+        $space = Space::query()->where('space_code', 'NOC2026')->firstOrFail();
+        $guest = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
+
+        Sanctum::actingAs($adminUser);
+
+        $this->getJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts?category=all')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.post.category', 'owner');
+
+        $operationCreated = $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'operation',
+            'title' => 'サービス運営からのお知らせ',
+            'body' => 'operation category の確認です。',
+            'status' => 'published',
+            'notifyMembers' => true,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.item.post.category', 'operation')
+            ->assertJsonPath('data.item.post.notifyMembers', true)
+            ->assertJsonPath('data.item.recipient', null);
+
+        $operationPostId = $operationCreated->json('data.item.post.id');
+
+        $personalCreated = $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
+            'category' => 'personal',
+            'title' => 'あなた宛のお知らせ',
+            'body' => 'personal category の確認です。',
+            'status' => 'draft',
+            'notifyMembers' => false,
+            'recipientUserId' => $guest->public_id,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.item.post.category', 'personal')
+            ->assertJsonPath('data.item.recipient.id', $guest->public_id);
+
+        $personalPostId = $personalCreated->json('data.item.post.id');
+
+        $this->getJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts?category=personal')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.post.id', $personalPostId)
+            ->assertJsonPath('data.0.recipient.id', $guest->public_id);
+
+        $this->patchJson('/api/v1/system-admin/posts/'.$personalPostId, [
+            'title' => 'あなた宛のお知らせ 改訂版',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.item.post.title', 'あなた宛のお知らせ 改訂版');
+
+        $this->postJson('/api/v1/system-admin/posts/'.$personalPostId.'/publish', [
+            'notifyMembers' => false,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.item.post.status', 'published');
+
+        $this->postJson('/api/v1/system-admin/posts/'.$operationPostId.'/archive')
+            ->assertOk()
+            ->assertJsonPath('data.item.post.status', 'archived');
+
+        $this->deleteJson('/api/v1/system-admin/posts/'.$operationPostId)
+            ->assertNoContent();
+
+        $this->assertDatabaseHas('space_posts', [
+            'public_id' => $personalPostId,
+            'category' => 'personal',
+            'status' => 'published',
+        ]);
+
+        $this->assertDatabaseHas('space_posts', [
+            'public_id' => $operationPostId,
+            'category' => 'operation',
+            'status' => 'deleted',
+        ]);
+
+        $this->assertDatabaseHas('space_post_deliveries', [
+            'recipient_user_id' => $guest->id,
+            'post_id' => SpacePost::query()->where('public_id', $personalPostId)->firstOrFail()->id,
+        ]);
     }
 
     private function systemAdminUser(): User

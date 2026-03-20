@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\SpaceController;
 use App\Http\Controllers\Api\V1\SystemAdminAuditController;
 use App\Http\Controllers\Api\V1\SystemAdminAuthController;
 use App\Http\Controllers\Api\V1\SystemAdminDashboardController;
+use App\Http\Controllers\Api\V1\SystemAdminPostController;
 use App\Http\Controllers\Api\V1\SystemAdminReportController;
 use App\Http\Controllers\Api\V1\SystemAdminSpaceController;
 use App\Http\Controllers\Api\V1\SystemAdminUserController;
@@ -43,6 +44,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::get('/posts/{post}', [PostController::class, 'show']);
         Route::put('/posts/{post}/reaction', [PostController::class, 'reaction']);
+        Route::post('/posts/{post}/read', [PostController::class, 'read']);
 
         Route::post('/whispers/{whisper}/report', [WhisperController::class, 'report']);
 
@@ -83,6 +85,12 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/spaces/{space}', [SystemAdminSpaceController::class, 'show']);
             Route::patch('/spaces/{space}', [SystemAdminSpaceController::class, 'update']);
             Route::post('/spaces/{space}/primary-owner', [SystemAdminSpaceController::class, 'assignPrimaryOwner']);
+            Route::get('/spaces/{space}/posts', [SystemAdminPostController::class, 'index']);
+            Route::post('/spaces/{space}/posts', [SystemAdminPostController::class, 'store']);
+            Route::patch('/posts/{post}', [SystemAdminPostController::class, 'update']);
+            Route::post('/posts/{post}/publish', [SystemAdminPostController::class, 'publish']);
+            Route::post('/posts/{post}/archive', [SystemAdminPostController::class, 'archive']);
+            Route::delete('/posts/{post}', [SystemAdminPostController::class, 'destroy']);
 
             Route::get('/users', [SystemAdminUserController::class, 'index']);
             Route::patch('/users/{user}', [SystemAdminUserController::class, 'update']);

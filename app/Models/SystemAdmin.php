@@ -26,4 +26,9 @@ class SystemAdmin extends Model
     {
         return $this->hasMany(SystemAdminAuditLog::class);
     }
+
+    public function createdPosts(): HasMany
+    {
+        return $this->hasMany(SpacePost::class, 'created_by_system_admin_id');
+    }
 }
