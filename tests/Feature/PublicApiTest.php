@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Space;
+use App\Models\SpaceCreationRequest;
 use App\Models\SpaceMembership;
 use App\Models\SpacePost;
 use App\Models\SpacePostDelivery;
@@ -59,6 +60,142 @@ class PublicApiTest extends TestCase
         $this->getJson('/api/v1/spaces/joined')
             ->assertOk()
             ->assertJsonCount(1, 'data.joinedSpaces');
+    }
+
+    public function test_user_can_create_and_list_space_creation_requests(): void
+    {
+        $this->seed();
+        $user = User::factory()->create([
+            'email' => 'creator@example.com',
+            'display_name' => 'Creator',
+            'status' => 'active',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $created = $this->postJson('/api/v1/spaces/creation-requests', [
+            'spaceName' => 'Noccaro Osaka',
+            'spaceCode' => 'osaka-new',
+            'joinPolicy' => 'approval_required',
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.request.status', 'pending')
+            ->assertJsonPath('data.request.requestType', 'space_creation')
+            ->assertJsonPath('data.request.spaceCode', 'OSAKA-NEW');
+
+        $requestId = $created->json('data.request.id');
+
+        $this->getJson('/api/v1/spaces/creation-requests')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $requestId)
+            ->assertJsonPath('data.0.spaceName', 'Noccaro Osaka');
+
+        $this->getJson('/api/v1/spaces/creation-requests/'.$requestId)
+            ->assertOk()
+            ->assertJsonPath('data.request.status', 'pending')
+            ->assertJsonPath('data.request.createdSpaceId', null);
+
+        $this->postJson('/api/v1/spaces/creation-requests', [
+            'spaceName' => 'Another Space',
+            'spaceCode' => 'ANOTHER1',
+            'joinPolicy' => 'auto_approve',
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'SPACE_CREATION_REQUEST_ALREADY_PENDING');
+
+        Sanctum::actingAs(User::factory()->create([
+            'email' => 'second-creator@example.com',
+            'display_name' => 'Second Creator',
+            'status' => 'active',
+        ]));
+
+        $this->postJson('/api/v1/spaces/creation-requests', [
+            'spaceName' => 'Reserved code test',
+            'spaceCode' => 'osaka-new',
+            'joinPolicy' => 'approval_required',
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'SPACE_CODE_ALREADY_RESERVED');
+    }
+
+    public function test_public_creation_request_visibility_matches_pending_rejected_and_approved_rules(): void
+    {
+        $this->seed();
+        $user = User::factory()->create([
+            'email' => 'creation-state@example.com',
+            'display_name' => 'Creation State',
+            'status' => 'active',
+        ]);
+        $space = Space::query()->where('space_code', 'NOC2026')->firstOrFail();
+
+        $pending = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $user->id,
+            'future_primary_owner_user_id' => $user->id,
+            'requested_space_name' => 'Pending Space',
+            'requested_space_code' => 'PENDING01',
+            'requested_join_policy' => 'approval_required',
+            'status' => 'pending',
+        ]);
+
+        $visibleRejected = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $user->id,
+            'future_primary_owner_user_id' => $user->id,
+            'requested_space_name' => 'Rejected Visible',
+            'requested_space_code' => 'REJECT01',
+            'requested_join_policy' => 'auto_approve',
+            'status' => 'rejected',
+            'rejected_at' => now()->subHours(12),
+            'reviewed_at' => now()->subHours(12),
+            'rejection_visible_until' => now()->addHours(60),
+        ]);
+
+        $expiredRejected = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $user->id,
+            'future_primary_owner_user_id' => $user->id,
+            'requested_space_name' => 'Rejected Hidden',
+            'requested_space_code' => 'REJECT02',
+            'requested_join_policy' => 'auto_approve',
+            'status' => 'rejected',
+            'rejected_at' => now()->subHours(80),
+            'reviewed_at' => now()->subHours(80),
+            'rejection_visible_until' => now()->subHours(8),
+        ]);
+
+        $approved = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $user->id,
+            'future_primary_owner_user_id' => $user->id,
+            'requested_space_name' => 'Approved Space',
+            'requested_space_code' => 'APPROVED1',
+            'requested_join_policy' => 'auto_approve',
+            'status' => 'approved',
+            'approved_space_id' => $space->id,
+            'approved_at' => now()->subHour(),
+            'reviewed_at' => now()->subHour(),
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->getJson('/api/v1/spaces/creation-requests')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonFragment([
+                'id' => $pending->public_id,
+                'status' => 'pending',
+            ])
+            ->assertJsonFragment([
+                'id' => $visibleRejected->public_id,
+                'status' => 'rejected',
+            ]);
+
+        $this->getJson('/api/v1/spaces/creation-requests/'.$approved->public_id)
+            ->assertOk()
+            ->assertJsonPath('data.request.status', 'approved')
+            ->assertJsonPath('data.request.createdSpaceId', $space->public_id);
+
+        $this->getJson('/api/v1/spaces/creation-requests/'.$expiredRejected->public_id)
+            ->assertStatus(404)
+            ->assertJsonPath('error.code', 'SPACE_CREATION_REQUEST_NOT_FOUND');
     }
 
     public function test_active_member_can_view_posts_and_toggle_reaction(): void

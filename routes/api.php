@@ -11,12 +11,14 @@ use App\Http\Controllers\Api\V1\DeviceController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PostController;
 use App\Http\Controllers\Api\V1\SpaceController;
+use App\Http\Controllers\Api\V1\SpaceCreationRequestController;
 use App\Http\Controllers\Api\V1\SystemAdminAuditController;
 use App\Http\Controllers\Api\V1\SystemAdminAuthController;
 use App\Http\Controllers\Api\V1\SystemAdminDashboardController;
 use App\Http\Controllers\Api\V1\SystemAdminPostController;
 use App\Http\Controllers\Api\V1\SystemAdminReportController;
 use App\Http\Controllers\Api\V1\SystemAdminSpaceController;
+use App\Http\Controllers\Api\V1\SystemAdminSpaceCreationRequestController;
 use App\Http\Controllers\Api\V1\SystemAdminUserController;
 use App\Http\Controllers\Api\V1\WhisperController;
 use Illuminate\Support\Facades\Route;
@@ -35,6 +37,9 @@ Route::prefix('v1')->group(function (): void {
         Route::put('/me/notification-settings', [MeController::class, 'updateNotificationSettings']);
 
         Route::get('/spaces/joined', [SpaceController::class, 'joined']);
+        Route::get('/spaces/creation-requests', [SpaceCreationRequestController::class, 'index']);
+        Route::post('/spaces/creation-requests', [SpaceCreationRequestController::class, 'store']);
+        Route::get('/spaces/creation-requests/{creationRequest}', [SpaceCreationRequestController::class, 'show']);
         Route::post('/spaces/join', [SpaceController::class, 'join']);
         Route::get('/spaces/{space}', [SpaceController::class, 'show']);
         Route::get('/spaces/{space}/membership', [SpaceController::class, 'membership']);
@@ -85,6 +90,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/spaces/{space}', [SystemAdminSpaceController::class, 'show']);
             Route::patch('/spaces/{space}', [SystemAdminSpaceController::class, 'update']);
             Route::post('/spaces/{space}/primary-owner', [SystemAdminSpaceController::class, 'assignPrimaryOwner']);
+            Route::get('/space-creation-requests', [SystemAdminSpaceCreationRequestController::class, 'index']);
+            Route::post('/space-creation-requests/{creationRequest}/approve', [SystemAdminSpaceCreationRequestController::class, 'approve']);
+            Route::post('/space-creation-requests/{creationRequest}/reject', [SystemAdminSpaceCreationRequestController::class, 'reject']);
             Route::get('/spaces/{space}/posts', [SystemAdminPostController::class, 'index']);
             Route::post('/spaces/{space}/posts', [SystemAdminPostController::class, 'store']);
             Route::patch('/posts/{post}', [SystemAdminPostController::class, 'update']);

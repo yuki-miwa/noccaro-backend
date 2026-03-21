@@ -61,4 +61,9 @@ class Space extends Model
     {
         return $this->hasMany(ContentReport::class);
     }
+
+    public function approvedCreationRequests(): HasMany
+    {
+        return $this->hasMany(SpaceCreationRequest::class, 'approved_space_id');
+    }
 }

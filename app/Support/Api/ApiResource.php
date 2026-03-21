@@ -5,6 +5,7 @@ namespace App\Support\Api;
 use App\Models\ContentReport;
 use App\Models\MapWhisper;
 use App\Models\Space;
+use App\Models\SpaceCreationRequest;
 use App\Models\SpaceMembership;
 use App\Models\SpaceNotification;
 use App\Models\SpacePost;
@@ -74,6 +75,22 @@ class ApiResource
         return [
             'space' => self::space($membership->space),
             'membership' => self::membership($membership),
+        ];
+    }
+
+    public static function spaceCreationRequest(SpaceCreationRequest $creationRequest): array
+    {
+        return [
+            'id' => $creationRequest->public_id,
+            'spaceName' => $creationRequest->requested_space_name,
+            'spaceCode' => $creationRequest->requested_space_code,
+            'joinPolicy' => $creationRequest->requested_join_policy,
+            'status' => $creationRequest->status,
+            'requestType' => 'space_creation',
+            'createdSpaceId' => $creationRequest->approvedSpace?->public_id,
+            'rejectionVisibleUntil' => self::iso($creationRequest->rejection_visible_until),
+            'createdAt' => self::iso($creationRequest->created_at),
+            'updatedAt' => self::iso($creationRequest->updated_at),
         ];
     }
 
@@ -294,6 +311,37 @@ class ApiResource
                     ->filter(fn (ContentReport $report) => in_array($report->status, ['open', 'reviewing'], true))
                     ->count(),
             ],
+        ];
+    }
+
+    public static function systemSpaceCreationRequest(SpaceCreationRequest $creationRequest): array
+    {
+        $creationRequest->loadMissing([
+            'requester',
+            'futurePrimaryOwner',
+            'approvedSpace',
+            'reviewedBySystemAdmin.user',
+        ]);
+
+        return [
+            'request' => self::spaceCreationRequest($creationRequest),
+            'requester' => $creationRequest->requester ? self::user($creationRequest->requester) : null,
+            'futurePrimaryOwner' => $creationRequest->futurePrimaryOwner
+                ? self::user($creationRequest->futurePrimaryOwner)
+                : null,
+            'createdSpace' => $creationRequest->approvedSpace
+                ? [
+                    'id' => $creationRequest->approvedSpace->public_id,
+                    'code' => $creationRequest->approvedSpace->space_code,
+                    'name' => $creationRequest->approvedSpace->name,
+                ]
+                : null,
+            'reviewedBy' => $creationRequest->reviewedBySystemAdmin
+                ? self::systemAdmin($creationRequest->reviewedBySystemAdmin)
+                : null,
+            'reviewedAt' => self::iso($creationRequest->reviewed_at),
+            'approvedAt' => self::iso($creationRequest->approved_at),
+            'rejectedAt' => self::iso($creationRequest->rejected_at),
         ];
     }
 

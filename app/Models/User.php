@@ -71,6 +71,16 @@ class User extends Authenticatable
         return $this->hasMany(Space::class, 'created_by_user_id');
     }
 
+    public function spaceCreationRequests(): HasMany
+    {
+        return $this->hasMany(SpaceCreationRequest::class, 'requester_user_id');
+    }
+
+    public function futurePrimaryOwnerRequests(): HasMany
+    {
+        return $this->hasMany(SpaceCreationRequest::class, 'future_primary_owner_user_id');
+    }
+
     public function systemAdmin(): HasOne
     {
         return $this->hasOne(SystemAdmin::class);

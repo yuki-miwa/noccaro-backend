@@ -7,6 +7,9 @@ use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Models\User;
 use App\Support\Api\ApiResource;
+use App\Support\SpaceCreationRequests\SpaceCreationRequestConfig;
+use App\Support\Spaces\SpaceCodeRegistry;
+use App\Support\Spaces\SpaceProvisioningService;
 use App\Support\SystemAdmin\SystemAdminAuditLogger;
 use App\Support\SystemAdmin\SystemAdminGuard;
 use Illuminate\Http\JsonResponse;
@@ -57,13 +60,15 @@ class SystemAdminSpaceController extends ApiController
         Request $request,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        SpaceCodeRegistry $codeRegistry,
+        SpaceProvisioningService $spaceProvisioner,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
 
         $payload = $request->validate([
             'name' => ['required', 'string', 'min:1', 'max:120'],
             'description' => ['nullable', 'string'],
-            'spaceCode' => ['required', 'string', 'max:20', 'unique:spaces,space_code'],
+            'spaceCode' => ['required', 'string', 'max:20'],
             'joinPolicy' => ['required', Rule::in(['auto_approve', 'approval_required'])],
             'maxOwnerCount' => ['required', 'integer', 'min:1'],
             'whisperTtlMinutes' => ['required', 'integer', 'min:1'],
@@ -82,30 +87,32 @@ class SystemAdminSpaceController extends ApiController
             throw new ApiException('CONFLICT', 'ロック中または無効なユーザーは主オーナーに設定できません。', 409);
         }
 
-        $space = DB::transaction(function () use ($actor, $logger, $payload, $targetUser): Space {
-            $space = Space::query()->create([
-                'name' => trim($payload['name']),
-                'description' => trim((string) ($payload['description'] ?? '')) ?: null,
-                'space_code' => trim($payload['spaceCode']),
-                'join_policy' => $payload['joinPolicy'],
-                'status' => 'active',
-                'max_owner_count' => $payload['maxOwnerCount'],
-                'whisper_ttl_minutes' => $payload['whisperTtlMinutes'],
-                'whisper_max_length' => $payload['whisperMaxLength'],
-                'location_grid_meters' => $payload['locationGridMeters'],
-                'location_jitter_enabled' => $payload['locationJitterEnabled'],
-                'created_by_user_id' => $actor->user_id,
-            ]);
+        $payload['spaceCode'] = $codeRegistry->normalize($payload['spaceCode']);
+        $codeRegistry->ensureAvailableForSpace($payload['spaceCode']);
 
-            $membership = SpaceMembership::query()->create([
-                'space_id' => $space->id,
-                'user_id' => $targetUser->id,
-                'role' => 'primary_owner',
-                'status' => 'active',
-                'joined_at' => now(),
-                'approved_at' => now(),
-                'last_seen_at' => now(),
-            ]);
+        $defaultSpaceSettings = SpaceCreationRequestConfig::defaultSpacePayload();
+
+        $space = DB::transaction(function () use ($actor, $defaultSpaceSettings, $logger, $payload, $spaceProvisioner, $targetUser): Space {
+            $created = $spaceProvisioner->createSpaceWithPrimaryOwner(
+                [
+                    'name' => $payload['name'],
+                    'description' => $payload['description'] ?? null,
+                    'spaceCode' => $payload['spaceCode'],
+                    'joinPolicy' => $payload['joinPolicy'],
+                    'maxOwnerCount' => $payload['maxOwnerCount'],
+                    'whisperTtlMinutes' => $payload['whisperTtlMinutes'],
+                    'whisperMaxLength' => $payload['whisperMaxLength'],
+                    'locationGridMeters' => $payload['locationGridMeters'],
+                    'locationJitterEnabled' => $payload['locationJitterEnabled'],
+                    'autoHideReportThreshold' => $defaultSpaceSettings['autoHideReportThreshold'],
+                    'postLimitPerMinute' => $defaultSpaceSettings['postLimitPerMinute'],
+                    'postLimitPerTenMinutes' => $defaultSpaceSettings['postLimitPerTenMinutes'],
+                ],
+                $actor->user,
+                $targetUser,
+            );
+            $space = $created['space'];
+            $membership = $created['primaryOwnerMembership'];
 
             $logger->log(
                 $actor,
@@ -138,17 +145,23 @@ class SystemAdminSpaceController extends ApiController
         Space $space,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        SpaceCodeRegistry $codeRegistry,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
 
         $payload = $request->validate([
             'name' => ['sometimes', 'string', 'min:1', 'max:120'],
             'description' => ['sometimes', 'nullable', 'string'],
-            'spaceCode' => ['sometimes', 'string', 'max:20', Rule::unique('spaces', 'space_code')->ignore($space->id)],
+            'spaceCode' => ['sometimes', 'string', 'max:20'],
             'joinPolicy' => ['sometimes', Rule::in(['auto_approve', 'approval_required'])],
             'status' => ['sometimes', Rule::in(['active', 'suspended', 'archived', 'deleted'])],
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
+
+        if (array_key_exists('spaceCode', $payload)) {
+            $payload['spaceCode'] = $codeRegistry->normalize($payload['spaceCode']);
+            $codeRegistry->ensureAvailableForSpace($payload['spaceCode'], ignoreSpaceId: $space->id);
+        }
 
         $space->fill([
             'name' => $payload['name'] ?? $space->name,

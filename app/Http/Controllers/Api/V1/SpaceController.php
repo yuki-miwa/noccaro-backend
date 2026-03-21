@@ -7,6 +7,7 @@ use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Support\Api\ApiResource;
 use App\Support\Spaces\MembershipGuard;
+use App\Support\Spaces\SpaceCodeRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -46,14 +47,16 @@ class SpaceController extends ApiController
         ]);
     }
 
-    public function join(Request $request): JsonResponse
+    public function join(Request $request, SpaceCodeRegistry $codeRegistry): JsonResponse
     {
         $payload = $request->validate([
             'spaceCode' => ['required', 'string', 'max:20'],
         ]);
 
+        $normalizedCode = $codeRegistry->normalize($payload['spaceCode']);
+
         $space = Space::query()
-            ->where('space_code', trim($payload['spaceCode']))
+            ->where('space_code', $normalizedCode)
             ->where('status', 'active')
             ->first();
 

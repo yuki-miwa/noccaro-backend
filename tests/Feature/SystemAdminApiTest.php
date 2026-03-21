@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\ContentReport;
 use App\Models\MapWhisper;
 use App\Models\Space;
+use App\Models\SpaceCreationRequest;
 use App\Models\SpaceMembership;
 use App\Models\SpacePost;
 use App\Models\SystemAdmin;
@@ -115,6 +116,118 @@ class SystemAdminApiTest extends TestCase
             'action' => 'user_status_updated',
             'entity_type' => 'user',
             'entity_public_id' => $initialOwner->public_id,
+        ]);
+
+        SpaceCreationRequest::query()->create([
+            'requester_user_id' => $backupOwner->id,
+            'future_primary_owner_user_id' => $backupOwner->id,
+            'requested_space_name' => '予約済みスペース',
+            'requested_space_code' => 'RESERVED1',
+            'requested_join_policy' => 'approval_required',
+            'status' => 'pending',
+        ]);
+
+        $this->postJson('/api/v1/system-admin/spaces', [
+            'name' => '衝突スペース',
+            'description' => 'pending request と同じコード',
+            'spaceCode' => 'reserved1',
+            'joinPolicy' => 'approval_required',
+            'maxOwnerCount' => 3,
+            'whisperTtlMinutes' => 180,
+            'whisperMaxLength' => 30,
+            'locationGridMeters' => 120,
+            'locationJitterEnabled' => true,
+            'initialPrimaryOwnerUserId' => $backupOwner->public_id,
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'SPACE_CODE_ALREADY_RESERVED');
+    }
+
+    public function test_system_admin_can_review_space_creation_requests(): void
+    {
+        $this->seed();
+
+        $adminUser = $this->systemAdminUser();
+        $requester = User::factory()->create([
+            'email' => 'space-requester@example.com',
+            'display_name' => 'Space Requester',
+            'status' => 'active',
+        ]);
+
+        $pendingRequest = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $requester->id,
+            'future_primary_owner_user_id' => $requester->id,
+            'requested_space_name' => '新規承認スペース',
+            'requested_space_code' => 'CREATE42',
+            'requested_join_policy' => 'approval_required',
+            'status' => 'pending',
+        ]);
+
+        Sanctum::actingAs($adminUser);
+
+        $this->getJson('/api/v1/system-admin/space-creation-requests?status=pending')
+            ->assertOk()
+            ->assertJsonPath('data.0.request.id', $pendingRequest->public_id)
+            ->assertJsonPath('data.0.requester.email', 'space-requester@example.com');
+
+        $approved = $this->postJson('/api/v1/system-admin/space-creation-requests/'.$pendingRequest->public_id.'/approve', [
+            'note' => 'initial approval',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.request.request.status', 'approved')
+            ->assertJsonPath('data.request.request.createdSpaceId', fn ($value) => is_string($value) && $value !== '')
+            ->assertJsonPath('data.space.space.code', 'CREATE42')
+            ->assertJsonPath('data.space.primaryOwner.userId', $requester->public_id);
+
+        $createdSpaceId = $approved->json('data.space.space.id');
+
+        $this->assertDatabaseHas('spaces', [
+            'public_id' => $createdSpaceId,
+            'space_code' => 'CREATE42',
+            'max_owner_count' => 3,
+            'whisper_ttl_minutes' => 180,
+            'whisper_max_length' => 20,
+            'location_grid_meters' => 120,
+            'whisper_auto_hide_report_threshold' => 5,
+            'whisper_rate_limit_per_minute' => 1,
+            'whisper_rate_limit_per_10min' => 3,
+            'location_jitter_enabled' => true,
+            'created_by_user_id' => $requester->id,
+        ]);
+
+        $this->assertDatabaseHas('space_memberships', [
+            'space_id' => Space::query()->where('public_id', $createdSpaceId)->firstOrFail()->id,
+            'user_id' => $requester->id,
+            'role' => 'primary_owner',
+            'status' => 'active',
+        ]);
+
+        $rejectTarget = SpaceCreationRequest::query()->create([
+            'requester_user_id' => $requester->id,
+            'future_primary_owner_user_id' => $requester->id,
+            'requested_space_name' => '棄却対象スペース',
+            'requested_space_code' => 'REJECT42',
+            'requested_join_policy' => 'auto_approve',
+            'status' => 'pending',
+        ]);
+
+        $this->postJson('/api/v1/system-admin/space-creation-requests/'.$rejectTarget->public_id.'/reject', [
+            'note' => 'policy mismatch',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.request.request.status', 'rejected')
+            ->assertJsonPath('data.request.request.rejectionVisibleUntil', fn ($value) => is_string($value) && $value !== '');
+
+        $this->assertDatabaseHas('system_admin_audit_logs', [
+            'action' => 'space_creation_request_approved',
+            'entity_type' => 'space_creation_request',
+            'entity_public_id' => $pendingRequest->public_id,
+        ]);
+
+        $this->assertDatabaseHas('system_admin_audit_logs', [
+            'action' => 'space_creation_request_rejected',
+            'entity_type' => 'space_creation_request',
+            'entity_public_id' => $rejectTarget->public_id,
         ]);
     }
 

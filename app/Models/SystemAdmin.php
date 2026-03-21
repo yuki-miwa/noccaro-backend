@@ -31,4 +31,9 @@ class SystemAdmin extends Model
     {
         return $this->hasMany(SpacePost::class, 'created_by_system_admin_id');
     }
+
+    public function reviewedSpaceCreationRequests(): HasMany
+    {
+        return $this->hasMany(SpaceCreationRequest::class, 'reviewed_by_system_admin_id');
+    }
 }

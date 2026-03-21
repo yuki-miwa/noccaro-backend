@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\MapWhisper;
 use App\Models\Space;
+use App\Models\SpaceCreationRequest;
 use App\Models\SpaceMembership;
 use App\Models\SpacePost;
 use App\Models\SystemAdmin;
@@ -88,6 +89,15 @@ class DatabaseSeeder extends Seeder
             'space_id' => $space->id,
             'user_id' => $pendingUser->id,
             'role' => 'guest',
+            'status' => 'pending',
+        ]);
+
+        SpaceCreationRequest::query()->create([
+            'requester_user_id' => $pendingUser->id,
+            'future_primary_owner_user_id' => $pendingUser->id,
+            'requested_space_name' => '大阪コミュニティ',
+            'requested_space_code' => 'OSAKA2026',
+            'requested_join_policy' => 'approval_required',
             'status' => 'pending',
         ]);
 
