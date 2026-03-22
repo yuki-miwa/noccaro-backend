@@ -140,6 +140,95 @@ class PublicApiTest extends TestCase
             ->assertJsonCount(1, 'data.joinedSpaces');
     }
 
+    public function test_public_space_endpoints_include_runtime_settings_fields(): void
+    {
+        $this->seed();
+        $user = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
+        $space = Space::query()->where('space_code', 'NOC2026')->firstOrFail();
+
+        $space->update([
+            'description' => 'runtime settings check',
+            'join_policy' => 'approval_required',
+            'max_owner_count' => 4,
+            'whisper_ttl_minutes' => 240,
+            'whisper_max_length' => 28,
+            'location_grid_meters' => 160,
+            'location_jitter_enabled' => false,
+            'whisper_auto_hide_report_threshold' => 7,
+            'whisper_rate_limit_per_minute' => 2,
+            'whisper_rate_limit_per_10min' => 5,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $assertRuntimeSettings = function (array $spacePayload): void {
+            $this->assertSame('runtime settings check', $spacePayload['description']);
+            $this->assertSame('active', $spacePayload['status']);
+            $this->assertSame(4, $spacePayload['maxOwnerCount']);
+            $this->assertSame(240, $spacePayload['whisperTtlMinutes']);
+            $this->assertSame(28, $spacePayload['whisperMaxLength']);
+            $this->assertSame(160, $spacePayload['locationGridMeters']);
+            $this->assertFalse($spacePayload['locationJitterEnabled']);
+            $this->assertSame(7, $spacePayload['autoHideReportThreshold']);
+            $this->assertSame(2, $spacePayload['postLimitPerMinute']);
+            $this->assertSame(5, $spacePayload['postLimitPerTenMinutes']);
+            $this->assertSame(7, $spacePayload['whisperAutoHideReportThreshold']);
+            $this->assertSame(2, $spacePayload['whisperRateLimitPerMinute']);
+            $this->assertSame(5, $spacePayload['whisperRateLimitPer10Min']);
+            $this->assertIsString($spacePayload['createdAt']);
+            $this->assertNotSame('', $spacePayload['createdAt']);
+        };
+
+        $joined = $this->getJson('/api/v1/spaces/joined')->assertOk();
+        $assertRuntimeSettings($joined->assertJsonPath('data.joinedSpaces.0.space.code', 'NOC2026')->json('data.joinedSpaces.0.space'));
+
+        $show = $this->getJson('/api/v1/spaces/'.$space->public_id)->assertOk();
+        $assertRuntimeSettings($show->assertJsonPath('data.space.code', 'NOC2026')->json('data.space'));
+
+        $newUser = User::factory()->create([
+            'email' => 'fresh-joiner@example.com',
+            'display_name' => 'Fresh Joiner',
+            'status' => 'active',
+        ]);
+        Sanctum::actingAs($newUser);
+
+        $join = $this->postJson('/api/v1/spaces/join', [
+            'spaceCode' => 'noc2026',
+        ])->assertOk();
+        $assertRuntimeSettings($join->assertJsonPath('data.space.code', 'NOC2026')->json('data.space'));
+    }
+
+    public function test_whisper_store_uses_space_whisper_max_length_setting(): void
+    {
+        $this->seed();
+        $user = User::query()->where('email', 'guest@noccaro.local')->firstOrFail();
+        $space = Space::query()->where('space_code', 'NOC2026')->firstOrFail();
+        $space->update([
+            'join_policy' => 'auto_approve',
+            'whisper_max_length' => 5,
+            'whisper_rate_limit_per_minute' => 5,
+            'whisper_rate_limit_per_10min' => 10,
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->postJson('/api/v1/spaces/'.$space->public_id.'/whispers', [
+            'body' => '123456',
+            'exactLat' => 35.6809591,
+            'exactLng' => 139.7673068,
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
+
+        $this->postJson('/api/v1/spaces/'.$space->public_id.'/whispers', [
+            'body' => '12345',
+            'exactLat' => 35.6809591,
+            'exactLng' => 139.7673068,
+        ])
+            ->assertCreated()
+            ->assertJsonPath('data.whisper.body', '12345');
+    }
+
     public function test_user_can_create_and_list_space_creation_requests(): void
     {
         $this->seed();

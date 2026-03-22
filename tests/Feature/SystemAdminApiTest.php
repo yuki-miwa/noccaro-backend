@@ -86,6 +86,21 @@ class SystemAdminApiTest extends TestCase
 
         $spaceId = $created->json('data.space.id');
 
+        Sanctum::actingAs($initialOwner);
+        $this->getJson('/api/v1/spaces/'.$spaceId)
+            ->assertOk()
+            ->assertJsonPath('data.space.description', 'system admin が作成したスペース')
+            ->assertJsonPath('data.space.maxOwnerCount', 3)
+            ->assertJsonPath('data.space.whisperTtlMinutes', 180)
+            ->assertJsonPath('data.space.whisperMaxLength', 30)
+            ->assertJsonPath('data.space.locationGridMeters', 120)
+            ->assertJsonPath('data.space.locationJitterEnabled', true)
+            ->assertJsonPath('data.space.autoHideReportThreshold', 5)
+            ->assertJsonPath('data.space.postLimitPerMinute', 1)
+            ->assertJsonPath('data.space.postLimitPerTenMinutes', 3);
+
+        Sanctum::actingAs($adminUser);
+
         $this->patchJson('/api/v1/system-admin/spaces/'.$spaceId, [
             'status' => 'suspended',
             'note' => 'support review',

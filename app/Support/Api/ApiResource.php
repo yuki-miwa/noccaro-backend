@@ -43,6 +43,9 @@ class ApiResource
             'whisperMaxLength' => $space->whisper_max_length,
             'locationGridMeters' => $space->location_grid_meters,
             'locationJitterEnabled' => $space->location_jitter_enabled,
+            'autoHideReportThreshold' => $space->whisper_auto_hide_report_threshold,
+            'postLimitPerMinute' => $space->whisper_rate_limit_per_minute,
+            'postLimitPerTenMinutes' => $space->whisper_rate_limit_per_10min,
             'whisperAutoHideReportThreshold' => $space->whisper_auto_hide_report_threshold,
             'whisperRateLimitPerMinute' => $space->whisper_rate_limit_per_minute,
             'whisperRateLimitPer10Min' => $space->whisper_rate_limit_per_10min,
@@ -280,6 +283,9 @@ class ApiResource
             'whisperMaxLength' => $space->whisper_max_length,
             'locationGridMeters' => $space->location_grid_meters,
             'locationJitterEnabled' => $space->location_jitter_enabled,
+            'autoHideReportThreshold' => $space->whisper_auto_hide_report_threshold,
+            'postLimitPerMinute' => $space->whisper_rate_limit_per_minute,
+            'postLimitPerTenMinutes' => $space->whisper_rate_limit_per_10min,
             'createdAt' => self::iso($space->created_at),
         ];
     }

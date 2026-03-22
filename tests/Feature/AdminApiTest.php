@@ -40,6 +40,19 @@ class AdminApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.space.name', 'Noccaro 運営コミュニティ')
             ->assertJsonPath('data.space.joinPolicy', 'auto_approve')
+            ->assertJsonPath('data.space.autoHideReportThreshold', 5)
+            ->assertJsonPath('data.space.postLimitPerMinute', 2)
+            ->assertJsonPath('data.space.postLimitPerTenMinutes', 6)
+            ->assertJsonPath('data.space.whisperRateLimitPerMinute', 2)
+            ->assertJsonPath('data.space.whisperRateLimitPer10Min', 6);
+
+        $this->getJson('/api/v1/spaces/'.$space->public_id)
+            ->assertOk()
+            ->assertJsonPath('data.space.name', 'Noccaro 運営コミュニティ')
+            ->assertJsonPath('data.space.description', '管理者向けに更新した説明です。')
+            ->assertJsonPath('data.space.autoHideReportThreshold', 5)
+            ->assertJsonPath('data.space.postLimitPerMinute', 2)
+            ->assertJsonPath('data.space.postLimitPerTenMinutes', 6)
             ->assertJsonPath('data.space.whisperRateLimitPerMinute', 2)
             ->assertJsonPath('data.space.whisperRateLimitPer10Min', 6);
 

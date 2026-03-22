@@ -70,7 +70,7 @@ class WhisperController extends ApiController
         WhisperLocationService $locationService,
     ): JsonResponse {
         $payload = $request->validate([
-            'body' => ['required', 'string', 'min:1', 'max:30', 'not_regex:/[\r\n]/'],
+            'body' => ['required', 'string', 'min:1', 'max:'.$space->whisper_max_length, 'not_regex:/[\r\n]/'],
             'exactLat' => ['required', 'numeric'],
             'exactLng' => ['required', 'numeric'],
         ]);
