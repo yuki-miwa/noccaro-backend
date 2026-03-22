@@ -35,7 +35,85 @@ class PublicApiTest extends TestCase
             ->getJson('/api/v1/me')
             ->assertOk()
             ->assertJsonPath('data.user.email', 'new-user@example.com')
-            ->assertJsonPath('data.notificationSettings.enabled', true);
+            ->assertJsonPath('data.notificationSettings.enabled', true)
+            ->assertJsonPath('data.profile.pendingEmail', null);
+    }
+
+    public function test_user_can_update_display_name_and_email_profile_fields(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'profile-user@example.com',
+            'display_name' => 'Before Update',
+            'password' => 'password123',
+            'status' => 'active',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson('/api/v1/me/profile', [
+            'displayName' => 'After Update',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.user.displayName', 'After Update')
+            ->assertJsonPath('data.user.email', 'profile-user@example.com')
+            ->assertJsonPath('data.profileUpdate.emailChangeRequiresVerification', false)
+            ->assertJsonPath('data.profileUpdate.pendingEmail', null);
+
+        $this->patchJson('/api/v1/me/profile', [
+            'displayName' => 'After Email Update',
+            'email' => 'profile-updated@example.com',
+            'currentPassword' => 'password123',
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.user.displayName', 'After Email Update')
+            ->assertJsonPath('data.user.email', 'profile-updated@example.com')
+            ->assertJsonPath('data.profileUpdate.emailChangeRequiresVerification', false)
+            ->assertJsonPath('data.profileUpdate.pendingEmail', null);
+
+        $this->getJson('/api/v1/me')
+            ->assertOk()
+            ->assertJsonPath('data.user.displayName', 'After Email Update')
+            ->assertJsonPath('data.user.email', 'profile-updated@example.com')
+            ->assertJsonPath('data.profile.pendingEmail', null);
+    }
+
+    public function test_profile_email_change_validates_current_password_and_uniqueness(): void
+    {
+        $user = User::factory()->create([
+            'email' => 'profile-check@example.com',
+            'display_name' => 'Profile Check',
+            'password' => 'password123',
+            'status' => 'active',
+        ]);
+        User::factory()->create([
+            'email' => 'already-used@example.com',
+            'display_name' => 'Already Used',
+            'password' => 'password123',
+            'status' => 'active',
+        ]);
+
+        Sanctum::actingAs($user);
+
+        $this->patchJson('/api/v1/me/profile', [
+            'email' => 'next@example.com',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'VALIDATION_ERROR')
+            ->assertJsonPath('error.details.field', 'currentPassword');
+
+        $this->patchJson('/api/v1/me/profile', [
+            'email' => 'next@example.com',
+            'currentPassword' => 'wrong-password',
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('error.code', 'CURRENT_PASSWORD_INVALID');
+
+        $this->patchJson('/api/v1/me/profile', [
+            'email' => 'already-used@example.com',
+            'currentPassword' => 'password123',
+        ])
+            ->assertStatus(409)
+            ->assertJsonPath('error.code', 'EMAIL_ALREADY_TAKEN');
     }
 
     public function test_join_returns_pending_for_approval_required_space(): void

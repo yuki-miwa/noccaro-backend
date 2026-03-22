@@ -33,6 +33,7 @@ Route::prefix('v1')->group(function (): void {
         Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
         Route::get('/me', [MeController::class, 'show']);
+        Route::patch('/me/profile', [MeController::class, 'updateProfile']);
         Route::get('/me/notification-settings', [MeController::class, 'notificationSettings']);
         Route::put('/me/notification-settings', [MeController::class, 'updateNotificationSettings']);
 
