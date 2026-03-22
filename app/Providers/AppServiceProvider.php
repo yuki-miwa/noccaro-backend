@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Contracts\Push\AndroidPushClient;
+use App\Support\Push\FcmHttpV1Client;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +13,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(AndroidPushClient::class, FcmHttpV1Client::class);
     }
 
     /**

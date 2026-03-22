@@ -6,6 +6,7 @@ use App\Models\Concerns\HasPublicId;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class SpaceNotification extends Model
 {
@@ -42,5 +43,15 @@ class SpaceNotification extends Model
     public function createdByMembership(): BelongsTo
     {
         return $this->belongsTo(SpaceMembership::class, 'created_by_membership_id');
+    }
+
+    public function deliveries(): HasMany
+    {
+        return $this->hasMany(NotificationDelivery::class, 'notification_id');
+    }
+
+    public function sourcePost(): BelongsTo
+    {
+        return $this->belongsTo(SpacePost::class, 'source_id');
     }
 }

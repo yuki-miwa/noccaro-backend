@@ -36,6 +36,28 @@ Noccaro の Laravel backend です。Flutter モバイルアプリと Web 管理
 - `POST /api/v1/devices/register`
 - `POST /api/v1/devices/unregister`
 
+## Android Push
+
+Android Push は FCM HTTP v1 で送信します。
+
+必要な env / secret:
+
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_SERVICE_ACCOUNT_PATH`
+  - 推奨。Lightsail では JSON ファイルをサーバー上に配置してこのパスを指定します
+- `FIREBASE_SERVICE_ACCOUNT_JSON`
+  - 文字列で直接渡したい場合のみ
+- `FIREBASE_ANDROID_CHANNEL_ID`
+- `FIREBASE_HTTP_TIMEOUT`
+
+notice publish 時の挙動:
+
+- `notifyMembers=true` の published notice が対象
+- `owner` / `operation` の両方に対応
+- `all_members` は active member + notifications enabled + active Android token
+- `targeted_users` は recipient のみ + notifications enabled + active Android token
+- 送信履歴は `notification_deliveries` で追跡
+
 ## 主要ドキュメント
 
 - [docs/backend_bootstrap_plan.md](docs/backend_bootstrap_plan.md)
@@ -98,5 +120,5 @@ php artisan noccaro:create-system-admin ops@example.com "Noccaro 運営管理者
 ## 既知事項
 
 - PostgreSQL 専用の partial index / trigger 最適化は未着手
-- queue / push delivery 実装は未着手
+- Firebase service account を未設定の環境では Push は `delivery_disabled` 扱いになります
 - 本番運用では PostgreSQL / Redis の監視とバックアップ設計が別途必要です

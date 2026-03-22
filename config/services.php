@@ -35,4 +35,12 @@ return [
         ],
     ],
 
+    'firebase' => [
+        'project_id' => env('FIREBASE_PROJECT_ID'),
+        'service_account_path' => env('FIREBASE_SERVICE_ACCOUNT_PATH'),
+        'service_account_json' => env('FIREBASE_SERVICE_ACCOUNT_JSON'),
+        'android_channel_id' => env('FIREBASE_ANDROID_CHANNEL_ID', 'default'),
+        'timeout' => env('FIREBASE_HTTP_TIMEOUT', 10),
+    ],
+
 ];

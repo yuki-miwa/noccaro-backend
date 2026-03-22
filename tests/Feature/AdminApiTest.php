@@ -224,13 +224,14 @@ class AdminApiTest extends TestCase
             'category' => 'owner',
             'audienceType' => 'targeted_users',
             'recipientUserIds' => [$guest->public_id],
-            'title' => '不正な通知設定',
-            'body' => 'targeted に notify は不可',
+            'title' => '指定対象への通知あり投稿',
+            'body' => 'targeted_users でも通知できる',
             'status' => 'draft',
             'notifyMembers' => true,
         ])
-            ->assertStatus(422)
-            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
+            ->assertCreated()
+            ->assertJsonPath('data.post.audienceType', 'targeted_users')
+            ->assertJsonPath('data.post.notifyMembers', true);
     }
 
     public function test_owner_can_resolve_reports_and_remove_whispers(): void

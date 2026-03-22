@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Exceptions\ApiException;
-use App\Models\SpaceNotification;
 use App\Models\SpacePost;
 use App\Models\SpacePostReaction;
 use App\Support\Admin\MemberActionLogger;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Notifications\NoticePushService;
 use App\Support\Posts\PostAudienceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,10 +22,13 @@ class AdminPostController extends ApiController
         SpacePost $post,
         SpaceAdminGuard $guard,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
         $this->assertOwnerCategory($post);
         $post->loadMissing('space');
+        $previousStatus = $post->status;
+        $previousNotifyMembers = $post->notify_members;
         $payload = $request->validate([
             'title' => ['sometimes', 'string', 'min:1', 'max:200'],
             'body' => ['sometimes', 'string'],
@@ -63,6 +66,10 @@ class AdminPostController extends ApiController
             $payload['recipientUserIds'] ?? $this->existingRecipientUserIds($post),
         );
 
+        if ($post->notify_members && $this->shouldQueuePostNotification($previousStatus, $previousNotifyMembers, $post)) {
+            $pushService->queuePostNotification($post, $actor);
+        }
+
         return $this->ok([
             'post' => $this->postPayload(
                 $post->fresh(['space', 'authorMembership']),
@@ -77,9 +84,12 @@ class AdminPostController extends ApiController
         SpacePost $post,
         SpaceAdminGuard $guard,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actorForPost($request->user(), $post);
         $this->assertOwnerCategory($post);
+        $previousStatus = $post->status;
+        $previousNotifyMembers = $post->notify_members;
         $payload = $request->validate([
             'notifyMembers' => ['nullable', 'boolean'],
         ]);
@@ -91,17 +101,8 @@ class AdminPostController extends ApiController
             'published_at' => $post->published_at ?? now(),
         ])->save();
 
-        if ($post->notify_members) {
-            SpaceNotification::query()->create([
-                'space_id' => $post->space_id,
-                'source_type' => 'post',
-                'source_id' => $post->id,
-                'created_by_membership_id' => $actor->id,
-                'title' => $post->title,
-                'body' => mb_substr($post->body, 0, 200),
-                'target_scope' => 'all_active_members',
-                'status' => 'queued',
-            ]);
+        if ($post->notify_members && $this->shouldQueuePostNotification($previousStatus, $previousNotifyMembers, $post)) {
+            $pushService->queuePostNotification($post, $actor);
         }
 
         return $this->ok([
@@ -169,5 +170,13 @@ class AdminPostController extends ApiController
     private function existingRecipientUserIds(SpacePost $post): array
     {
         return $post->deliveries()->with('recipient')->get()->map(fn ($delivery) => $delivery->recipient?->public_id)->filter()->values()->all();
+    }
+
+    private function shouldQueuePostNotification(string $previousStatus, bool $previousNotifyMembers, SpacePost $post): bool
+    {
+        $becamePublished = $previousStatus !== 'published' && $post->status === 'published';
+        $notificationsBecameEnabled = ! $previousNotifyMembers && $post->notify_members;
+
+        return $post->status === 'published' && ($becamePublished || $notificationsBecameEnabled);
     }
 }

@@ -5,9 +5,9 @@ namespace App\Http\Controllers\Api\V1;
 use App\Exceptions\ApiException;
 use App\Models\Space;
 use App\Models\SpaceMembership;
-use App\Models\SpaceNotification;
 use App\Models\SpacePost;
 use App\Support\Api\ApiResource;
+use App\Support\Notifications\NoticePushService;
 use App\Support\Posts\PostAudienceService;
 use App\Support\SystemAdmin\SystemAdminAuditLogger;
 use App\Support\SystemAdmin\SystemAdminGuard;
@@ -58,6 +58,7 @@ class SystemAdminPostController extends ApiController
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $payload = $request->validate([
@@ -95,7 +96,7 @@ class SystemAdminPostController extends ApiController
         $recipients = $audienceService->syncRecipients($post, $audienceType, $payload['recipientUserIds'] ?? []);
 
         if ($post->status === 'published' && $post->notify_members) {
-            $this->queuePostNotification($post, $authorMembership);
+            $pushService->queuePostNotification($post, $authorMembership);
         }
 
         $logger->log(
@@ -127,9 +128,12 @@ class SystemAdminPostController extends ApiController
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
-        $post->loadMissing(['space', 'createdBySystemAdmin.user']);
+        $post->loadMissing(['space', 'authorMembership', 'createdBySystemAdmin.user']);
+        $previousStatus = $post->status;
+        $previousNotifyMembers = $post->notify_members;
 
         $payload = $request->validate([
             'title' => ['sometimes', 'string', 'min:1', 'max:200'],
@@ -170,6 +174,10 @@ class SystemAdminPostController extends ApiController
             $payload['recipientUserIds'] ?? $this->existingRecipientUserIds($post),
         );
 
+        if ($post->notify_members && $this->shouldQueuePostNotification($previousStatus, $previousNotifyMembers, $post)) {
+            $pushService->queuePostNotification($post, $post->authorMembership);
+        }
+
         $logger->log(
             $actor,
             'post_updated',
@@ -199,9 +207,12 @@ class SystemAdminPostController extends ApiController
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $post->loadMissing(['space', 'authorMembership']);
+        $previousStatus = $post->status;
+        $previousNotifyMembers = $post->notify_members;
         $payload = $request->validate([
             'notifyMembers' => ['nullable', 'boolean'],
         ]);
@@ -214,8 +225,8 @@ class SystemAdminPostController extends ApiController
             'published_at' => $post->published_at ?? now(),
         ])->save();
 
-        if ($post->notify_members) {
-            $this->queuePostNotification($post, $post->authorMembership);
+        if ($post->notify_members && $this->shouldQueuePostNotification($previousStatus, $previousNotifyMembers, $post)) {
+            $pushService->queuePostNotification($post, $post->authorMembership);
         }
 
         $recipientUserIds = $this->existingRecipientUserIds($post);
@@ -318,20 +329,6 @@ class SystemAdminPostController extends ApiController
         return $membership;
     }
 
-    private function queuePostNotification(SpacePost $post, SpaceMembership $authorMembership): void
-    {
-        SpaceNotification::query()->create([
-            'space_id' => $post->space_id,
-            'source_type' => 'post',
-            'source_id' => $post->id,
-            'created_by_membership_id' => $authorMembership->id,
-            'title' => $post->title,
-            'body' => mb_substr($post->body, 0, 200),
-            'target_scope' => 'all_active_members',
-            'status' => 'queued',
-        ]);
-    }
-
     private function systemPostItems(Collection $posts, PostAudienceService $audienceService): array
     {
         $recipientIdsByPost = $audienceService->recipientPublicIdsForPosts($posts);
@@ -354,5 +351,13 @@ class SystemAdminPostController extends ApiController
     private function existingRecipientUserIds(SpacePost $post): array
     {
         return $post->deliveries()->with('recipient')->get()->map(fn ($delivery) => $delivery->recipient?->public_id)->filter()->values()->all();
+    }
+
+    private function shouldQueuePostNotification(string $previousStatus, bool $previousNotifyMembers, SpacePost $post): bool
+    {
+        $becamePublished = $previousStatus !== 'published' && $post->status === 'published';
+        $notificationsBecameEnabled = ! $previousNotifyMembers && $post->notify_members;
+
+        return $post->status === 'published' && ($becamePublished || $notificationsBecameEnabled);
     }
 }

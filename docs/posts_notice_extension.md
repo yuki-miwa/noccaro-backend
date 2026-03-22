@@ -146,7 +146,7 @@ Rules:
 - `audienceType` omitted は `all_members`
 - `targeted_users` の場合は `recipientUserIds` 必須
 - recipient はその space の active member である必要がある
-- MVP では `targeted_users + notifyMembers=true` は不可
+- `targeted_users + notifyMembers=true` も許可し、recipient のみへ Push を送れる
 - `operation` を owner admin API に投げた場合は拒否
 
 ### System admin
@@ -181,7 +181,7 @@ Rules:
 - `category` は `operation` 固定
 - `targeted_users` の場合は `recipientUserIds` 必須
 - recipient はその space の active member である必要がある
-- MVP では `targeted_users + notifyMembers=true` は不可
+- `targeted_users + notifyMembers=true` も許可し、recipient のみへ Push を送れる
 
 ## Compatibility notes
 

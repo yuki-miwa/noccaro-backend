@@ -11,6 +11,7 @@ use App\Models\SpacePost;
 use App\Models\SpacePostReaction;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Notifications\NoticePushService;
 use App\Support\Posts\PostAudienceService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -176,6 +177,7 @@ class AdminSpaceController extends ApiController
         Space $space,
         SpaceAdminGuard $guard,
         PostAudienceService $audienceService,
+        NoticePushService $pushService,
     ): JsonResponse {
         $actor = $guard->actorForSpace($request->user(), $space);
 
@@ -211,7 +213,7 @@ class AdminSpaceController extends ApiController
         $recipients = $audienceService->syncRecipients($post, $audienceType, $payload['recipientUserIds'] ?? []);
 
         if ($post->status === 'published' && $post->notify_members) {
-            $this->queuePostNotification($post, $actor);
+            $pushService->queuePostNotification($post, $actor);
         }
 
         $post->load(['space', 'authorMembership']);
@@ -316,19 +318,5 @@ class AdminSpaceController extends ApiController
         return $this->ok([
             'notification' => ApiResource::notification($notification),
         ], 201);
-    }
-
-    private function queuePostNotification(SpacePost $post, SpaceMembership $actor): void
-    {
-        SpaceNotification::query()->create([
-            'space_id' => $post->space_id,
-            'source_type' => 'post',
-            'source_id' => $post->id,
-            'created_by_membership_id' => $actor->id,
-            'title' => $post->title,
-            'body' => mb_substr($post->body, 0, 200),
-            'target_scope' => 'all_active_members',
-            'status' => 'queued',
-        ]);
     }
 }

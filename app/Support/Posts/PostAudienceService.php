@@ -19,13 +19,7 @@ class PostAudienceService
 
     public function normalizeNotifyMembers(string $audienceType, bool $notifyMembers): bool
     {
-        if ($audienceType === 'targeted_users' && $notifyMembers) {
-            throw new ApiException('VALIDATION_ERROR', 'targeted_users のお知らせでは notifyMembers を true にできません。', 422, [
-                'field' => 'notifyMembers',
-            ]);
-        }
-
-        return $audienceType === 'targeted_users' ? false : $notifyMembers;
+        return $notifyMembers;
     }
 
     public function resolveRecipientUsers(Space $space, array $recipientUserIds): Collection

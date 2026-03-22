@@ -316,12 +316,13 @@ class SystemAdminApiTest extends TestCase
             'title' => 'あなた宛のお知らせ',
             'body' => 'targeted operation の確認です。',
             'status' => 'draft',
-            'notifyMembers' => false,
+            'notifyMembers' => true,
             'recipientUserIds' => [$guest->public_id],
         ])
             ->assertCreated()
             ->assertJsonPath('data.item.post.category', 'operation')
             ->assertJsonPath('data.item.post.audienceType', 'targeted_users')
+            ->assertJsonPath('data.item.post.notifyMembers', true)
             ->assertJsonPath('data.item.post.recipientUserIds.0', $guest->public_id);
 
         $targetedOperationPostId = $targetedOperationCreated->json('data.item.post.id');
@@ -340,10 +341,11 @@ class SystemAdminApiTest extends TestCase
             ->assertJsonPath('data.item.post.recipientUserIds.0', $guest->public_id);
 
         $this->postJson('/api/v1/system-admin/posts/'.$targetedOperationPostId.'/publish', [
-            'notifyMembers' => false,
+            'notifyMembers' => true,
         ])
             ->assertOk()
-            ->assertJsonPath('data.item.post.status', 'published');
+            ->assertJsonPath('data.item.post.status', 'published')
+            ->assertJsonPath('data.item.post.notifyMembers', true);
 
         $this->postJson('/api/v1/system-admin/posts/'.$operationPostId.'/archive')
             ->assertOk()
@@ -370,17 +372,6 @@ class SystemAdminApiTest extends TestCase
             'post_id' => SpacePost::query()->where('public_id', $targetedOperationPostId)->firstOrFail()->id,
         ]);
 
-        $this->postJson('/api/v1/system-admin/spaces/'.$space->public_id.'/posts', [
-            'category' => 'operation',
-            'audienceType' => 'targeted_users',
-            'title' => '不正な通知設定',
-            'body' => 'targeted に notify は不可',
-            'status' => 'draft',
-            'notifyMembers' => true,
-            'recipientUserIds' => [$guest->public_id],
-        ])
-            ->assertStatus(422)
-            ->assertJsonPath('error.code', 'VALIDATION_ERROR');
     }
 
     private function systemAdminUser(): User
