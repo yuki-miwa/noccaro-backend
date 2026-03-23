@@ -21,6 +21,12 @@
 - `height`
 - `byte_size`
 
+運用メモ:
+- live では `local` disk の root が `storage/app/private` になる
+- `php-fpm` の実行ユーザーが `storage/app/private` と `storage/app/private/whispers` に書き込めること
+- Lightsail 1 台構成では `ubuntu:www-data` + directory mode `2775` を基準にする
+- scheduler / queue から purge するため、CLI 実行ユーザーも `www-data` グループで動かす
+
 ## Processing
 
 - 受け付け: `jpeg`, `png`, `webp`

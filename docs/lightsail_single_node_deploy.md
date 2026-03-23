@@ -48,6 +48,28 @@ Noccaro の MVP を Amazon Lightsail 1 台で動かす前提のメモです。
 - `php artisan migrate:status`
 - `php artisan route:list --path=api`
 - `curl -H 'Accept: application/json' https://<domain>/api/v1/me`
+- `stat -c '%U %G %a %n' /var/www/noccaro-backend/storage/app/private /var/www/noccaro-backend/storage/app/private/whispers`
+
+## Whisper 画像保存の補足
+
+- Whisper 画像は `local` disk の private storage に保存する
+- `storage/app/private` と `storage/app/private/whispers` は `php-fpm` から書き込み可能であること
+- Lightsail では `ubuntu:www-data` + `2775` を基準にしておくと再発しにくい
+- 初回セットアップ時は次を実行する
+
+```bash
+sudo usermod -aG www-data ubuntu
+sudo mkdir -p /var/www/noccaro-backend/storage/app/private/whispers
+sudo chown -R ubuntu:www-data /var/www/noccaro-backend/storage/app/private
+sudo find /var/www/noccaro-backend/storage/app/private -type d -exec chmod 2775 {} \;
+sudo find /var/www/noccaro-backend/storage/app/private -type f -exec chmod 664 {} \;
+```
+
+- scheduler をユーザー crontab で回す場合は `www-data` グループで実行する
+
+```bash
+crontab -l | { cat; echo "* * * * * cd /var/www/noccaro-backend && /usr/bin/sg www-data -c '/usr/bin/php artisan schedule:run' >> /dev/null 2>&1"; } | crontab -
+```
 
 ## 補足
 

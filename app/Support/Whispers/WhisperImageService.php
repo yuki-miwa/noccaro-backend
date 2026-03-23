@@ -24,6 +24,10 @@ class WhisperImageService
         $storage = Storage::disk($disk);
 
         try {
+            if (! $storage->exists($directory)) {
+                $storage->makeDirectory($directory);
+            }
+
             $storage->put($originalPath, $processed->originalBinary);
             $storage->put($previewPath, $processed->previewBinary);
             $storage->put($thumbnailPath, $processed->thumbnailBinary);
