@@ -9,6 +9,7 @@ use App\Models\SpaceMembership;
 use App\Support\Admin\MemberActionLogger;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Whispers\WhisperLifecycleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,7 @@ class AdminReportController extends ApiController
         ContentReport $report,
         SpaceAdminGuard $guard,
         MemberActionLogger $logger,
+        WhisperLifecycleService $lifecycle,
     ): JsonResponse {
         $actor = $guard->actorForReport($request->user(), $report);
         $payload = $request->validate([
@@ -28,7 +30,7 @@ class AdminReportController extends ApiController
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        DB::transaction(function () use ($actor, $report, $payload, $guard, $logger): void {
+        DB::transaction(function () use ($actor, $report, $payload, $guard, $logger, $lifecycle): void {
             $report->loadMissing(['space', 'reporterMembership.user']);
             $report->forceFill([
                 'status' => 'resolved',
@@ -43,11 +45,7 @@ class AdminReportController extends ApiController
             switch ($payload['resolutionType']) {
                 case 'content_removed':
                     if ($targetWhisper) {
-                        $targetWhisper->forceFill([
-                            'status' => 'removed_by_owner',
-                            'removed_at' => now(),
-                            'removed_by_membership_id' => $actor->id,
-                        ])->save();
+                        $lifecycle->remove($targetWhisper, $actor->id, 'removed_by_owner');
                     }
                     if ($targetMembership) {
                         $logger->log($actor, $targetMembership, 'remove_whisper', $payload['note'] ?? null, $report);
@@ -107,7 +105,7 @@ class AdminReportController extends ApiController
         ];
 
         if ($freshReport->target_type === 'whisper') {
-            $whisper = MapWhisper::query()->with(['space', 'membership'])->find($freshReport->target_id);
+            $whisper = MapWhisper::query()->with(['space', 'membership', 'image'])->find($freshReport->target_id);
             if ($whisper) {
                 $payload['whisper'] = ApiResource::whisper($whisper);
             }

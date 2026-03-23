@@ -6,6 +6,7 @@ use App\Models\MapWhisper;
 use App\Support\Admin\MemberActionLogger;
 use App\Support\Admin\SpaceAdminGuard;
 use App\Support\Api\ApiResource;
+use App\Support\Whispers\WhisperLifecycleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -16,6 +17,7 @@ class AdminWhisperController extends ApiController
         MapWhisper $whisper,
         SpaceAdminGuard $guard,
         MemberActionLogger $logger,
+        WhisperLifecycleService $lifecycle,
     ): JsonResponse {
         $actor = $guard->actorForWhisper($request->user(), $whisper);
         $payload = $request->validate([
@@ -23,18 +25,14 @@ class AdminWhisperController extends ApiController
         ]);
 
         $whisper->loadMissing(['space', 'membership']);
-        $whisper->forceFill([
-            'status' => 'removed_by_owner',
-            'removed_at' => now(),
-            'removed_by_membership_id' => $actor->id,
-        ])->save();
+        $lifecycle->remove($whisper, $actor->id, 'removed_by_owner');
 
         $logger->log($actor, $whisper->membership, 'remove_whisper', $payload['reason'] ?? null, null, null, [
             'whisperId' => $whisper->public_id,
         ]);
 
         return $this->ok([
-            'whisper' => ApiResource::whisper($whisper->fresh(['space', 'membership'])),
+            'whisper' => ApiResource::whisper($whisper->fresh(['space', 'membership', 'image'])),
         ]);
     }
 }

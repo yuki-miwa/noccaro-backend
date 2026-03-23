@@ -6,6 +6,7 @@ use App\Models\Concerns\HasPublicId;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class MapWhisper extends Model
 {
@@ -51,5 +52,10 @@ class MapWhisper extends Model
     public function removedByMembership(): BelongsTo
     {
         return $this->belongsTo(SpaceMembership::class, 'removed_by_membership_id');
+    }
+
+    public function image(): HasOne
+    {
+        return $this->hasOne(WhisperImage::class, 'whisper_id');
     }
 }

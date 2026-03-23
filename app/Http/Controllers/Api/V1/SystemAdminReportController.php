@@ -8,6 +8,7 @@ use App\Models\SpaceMembership;
 use App\Support\Api\ApiResource;
 use App\Support\SystemAdmin\SystemAdminAuditLogger;
 use App\Support\SystemAdmin\SystemAdminGuard;
+use App\Support\Whispers\WhisperLifecycleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -52,6 +53,7 @@ class SystemAdminReportController extends ApiController
         ContentReport $report,
         SystemAdminGuard $guard,
         SystemAdminAuditLogger $logger,
+        WhisperLifecycleService $lifecycle,
     ): JsonResponse {
         $actor = $guard->actor($request->user());
         $payload = $request->validate([
@@ -59,7 +61,7 @@ class SystemAdminReportController extends ApiController
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        DB::transaction(function () use ($actor, $logger, $payload, $report): void {
+        DB::transaction(function () use ($actor, $logger, $payload, $report, $lifecycle): void {
             $report->forceFill([
                 'status' => 'resolved',
                 'handled_by_membership_id' => null,
@@ -73,11 +75,7 @@ class SystemAdminReportController extends ApiController
             switch ($payload['resolutionType']) {
                 case 'content_removed':
                     if ($targetWhisper) {
-                        $targetWhisper->forceFill([
-                            'status' => 'removed_by_owner',
-                            'removed_at' => now(),
-                            'removed_by_membership_id' => null,
-                        ])->save();
+                        $lifecycle->remove($targetWhisper, null, 'removed_by_owner');
                     }
                     break;
                 case 'mute':

@@ -13,6 +13,8 @@ use App\Models\SystemAdmin;
 use App\Models\SystemAdminAuditLog;
 use App\Models\User;
 use App\Models\UserPushDevice;
+use App\Models\WhisperImage;
+use Illuminate\Support\Facades\URL;
 
 class ApiResource
 {
@@ -148,6 +150,7 @@ class ApiResource
             'displayRadiusM' => $whisper->display_radius_m,
             'expiresAt' => self::iso($whisper->expires_at),
             'reportCount' => $whisper->report_count,
+            'image' => self::whisperImage($whisper),
             'createdAt' => self::iso($whisper->created_at),
         ];
     }
@@ -216,7 +219,7 @@ class ApiResource
         ];
 
         if ($report->target_type === 'whisper') {
-            $whisper = MapWhisper::query()->with(['space', 'membership'])->find($report->target_id);
+            $whisper = MapWhisper::query()->with(['space', 'membership', 'image'])->find($report->target_id);
             if ($whisper) {
                 $target['whisper'] = self::whisper($whisper);
             }
@@ -374,9 +377,9 @@ class ApiResource
     {
         $report->loadMissing(['space', 'reporterMembership.user']);
 
-        $targetBody = null;
+        $whisper = null;
         if ($report->target_type === 'whisper') {
-            $targetBody = MapWhisper::query()->find($report->target_id)?->body;
+            $whisper = MapWhisper::query()->with('image')->find($report->target_id);
         }
 
         return [
@@ -385,7 +388,7 @@ class ApiResource
                 'spaceId' => $report->space?->public_id,
                 'targetType' => $report->target_type,
                 'targetId' => $report->target_type === 'whisper'
-                    ? (MapWhisper::query()->find($report->target_id)?->public_id ?? (string) $report->target_id)
+                    ? ($whisper?->public_id ?? (string) $report->target_id)
                     : (string) $report->target_id,
                 'reasonType' => $report->reason_type,
                 'status' => $report->status,
@@ -400,9 +403,10 @@ class ApiResource
             ],
             'target' => [
                 'id' => $report->target_type === 'whisper'
-                    ? (MapWhisper::query()->find($report->target_id)?->public_id ?? (string) $report->target_id)
+                    ? ($whisper?->public_id ?? (string) $report->target_id)
                     : (string) $report->target_id,
-                'body' => $targetBody ?? '対象コンテンツ',
+                'body' => $whisper?->body ?? '対象コンテンツ',
+                'imageThumbnailUrl' => $whisper ? (self::whisperImage($whisper)['thumbnailUrl'] ?? null) : null,
             ],
             'reporter' => [
                 'id' => $report->reporterMembership?->user?->public_id,
@@ -432,6 +436,43 @@ class ApiResource
     private static function devicePublicId(UserPushDevice $device): string
     {
         return sprintf('%s:%s', $device->platform, substr(sha1($device->push_token), 0, 24));
+    }
+
+    private static function whisperImage(MapWhisper $whisper): ?array
+    {
+        if ($whisper->status !== 'active' || ! $whisper->expires_at?->isFuture()) {
+            return null;
+        }
+
+        $image = $whisper->relationLoaded('image')
+            ? $whisper->image
+            : $whisper->image()->first();
+
+        if (! $image instanceof WhisperImage) {
+            return null;
+        }
+
+        return [
+            'originalUrl' => self::signedWhisperImageUrl($whisper, 'original'),
+            'previewUrl' => self::signedWhisperImageUrl($whisper, 'preview'),
+            'thumbnailUrl' => self::signedWhisperImageUrl($whisper, 'thumbnail'),
+            'mimeType' => $image->mime_type,
+            'width' => $image->width,
+            'height' => $image->height,
+            'byteSize' => $image->byte_size,
+        ];
+    }
+
+    private static function signedWhisperImageUrl(MapWhisper $whisper, string $variant): string
+    {
+        return URL::temporarySignedRoute(
+            'api.v1.whispers.image',
+            $whisper->expires_at,
+            [
+                'whisper' => $whisper->public_id,
+                'variant' => $variant,
+            ],
+        );
     }
 
     public static function iso(mixed $value): ?string

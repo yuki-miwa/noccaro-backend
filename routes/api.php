@@ -21,12 +21,16 @@ use App\Http\Controllers\Api\V1\SystemAdminSpaceController;
 use App\Http\Controllers\Api\V1\SystemAdminSpaceCreationRequestController;
 use App\Http\Controllers\Api\V1\SystemAdminUserController;
 use App\Http\Controllers\Api\V1\WhisperController;
+use App\Http\Controllers\Api\V1\WhisperImageController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
     Route::post('/system-admin/auth/login', [SystemAdminAuthController::class, 'login']);
+    Route::get('/whispers/{whisper}/image/{variant}', [WhisperImageController::class, 'show'])
+        ->middleware('signed')
+        ->name('api.v1.whispers.image');
 
     Route::middleware('auth:sanctum')->group(function (): void {
         Route::post('/auth/logout', [AuthController::class, 'logout']);

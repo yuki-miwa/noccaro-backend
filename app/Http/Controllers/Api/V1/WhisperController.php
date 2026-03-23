@@ -8,25 +8,27 @@ use App\Models\MapWhisper;
 use App\Models\Space;
 use App\Support\Api\ApiResource;
 use App\Support\Spaces\MembershipGuard;
+use App\Support\Whispers\WhisperImageService;
+use App\Support\Whispers\WhisperLifecycleService;
 use App\Support\Whispers\WhisperLocationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class WhisperController extends ApiController
 {
-    public function index(Request $request, Space $space, MembershipGuard $guard): JsonResponse
-    {
+    public function index(
+        Request $request,
+        Space $space,
+        MembershipGuard $guard,
+        WhisperLifecycleService $lifecycle,
+    ): JsonResponse {
         $guard->requireActiveMembership($request->user(), $space);
-
-        MapWhisper::query()
-            ->where('space_id', $space->id)
-            ->where('status', 'active')
-            ->where('expires_at', '<=', now())
-            ->update(['status' => 'expired']);
+        $lifecycle->expireOverdueWhispers($space);
 
         $limit = (int) ($request->integer('limit') ?: 100);
         $whispersQuery = MapWhisper::query()
-            ->with('space')
+            ->with(['space', 'image'])
             ->where('space_id', $space->id)
             ->where('status', 'active')
             ->where('expires_at', '>', now())
@@ -68,11 +70,13 @@ class WhisperController extends ApiController
         Space $space,
         MembershipGuard $guard,
         WhisperLocationService $locationService,
+        WhisperImageService $images,
     ): JsonResponse {
         $payload = $request->validate([
             'body' => ['required', 'string', 'min:1', 'max:'.$space->whisper_max_length, 'not_regex:/[\r\n]/'],
             'exactLat' => ['required', 'numeric'],
             'exactLng' => ['required', 'numeric'],
+            'image' => ['nullable', 'file', 'max:'.((int) config('whisper_images.max_upload_kb', 8192)), 'mimetypes:image/jpeg,image/png,image/webp'],
         ]);
 
         $membership = $guard->requireActiveMembership($request->user(), $space);
@@ -86,33 +90,58 @@ class WhisperController extends ApiController
             $space->location_jitter_enabled,
         );
 
-        $whisper = MapWhisper::query()->create([
-            'space_id' => $space->id,
-            'membership_id' => $membership->id,
-            'body' => trim($payload['body']),
-            'status' => 'active',
-            'grid_key' => $display['gridKey'],
-            'display_lat' => $display['displayLat'],
-            'display_lng' => $display['displayLng'],
-            'display_radius_m' => $display['displayRadiusM'],
-            'expires_at' => now()->addMinutes($space->whisper_ttl_minutes),
-            'report_count' => 0,
-        ]);
-        $whisper->load('space');
+        $whisper = null;
+
+        try {
+            DB::beginTransaction();
+
+            $whisper = MapWhisper::query()->create([
+                'space_id' => $space->id,
+                'membership_id' => $membership->id,
+                'body' => trim($payload['body']),
+                'status' => 'active',
+                'grid_key' => $display['gridKey'],
+                'display_lat' => $display['displayLat'],
+                'display_lng' => $display['displayLng'],
+                'display_radius_m' => $display['displayRadiusM'],
+                'expires_at' => now()->addMinutes($space->whisper_ttl_minutes),
+                'report_count' => 0,
+            ]);
+
+            if ($request->hasFile('image')) {
+                $images->attachUploadedImage($whisper, $request->file('image'));
+            }
+
+            DB::commit();
+        } catch (\Throwable $exception) {
+            DB::rollBack();
+
+            if ($whisper instanceof MapWhisper) {
+                $images->purgeDirectoryByPublicId($whisper->public_id);
+            }
+
+            throw $exception;
+        }
+
+        $whisper->load(['space', 'membership', 'image']);
 
         return $this->ok([
             'whisper' => ApiResource::whisper($whisper),
         ], 201);
     }
 
-    public function report(Request $request, MapWhisper $whisper, MembershipGuard $guard): JsonResponse
-    {
+    public function report(
+        Request $request,
+        MapWhisper $whisper,
+        MembershipGuard $guard,
+        WhisperLifecycleService $lifecycle,
+    ): JsonResponse {
         $payload = $request->validate([
             'reasonType' => ['required', 'in:spam,harassment,privacy_risk,inappropriate,other'],
             'detail' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        $whisper->loadMissing(['space']);
+        $whisper->loadMissing(['space', 'image']);
         if ($whisper->expires_at <= now()) {
             $whisper->forceFill(['status' => 'expired'])->save();
             throw new ApiException('WHISPER_EXPIRED', '期限切れの whisper は通報できません。', 409);
@@ -142,12 +171,9 @@ class WhisperController extends ApiController
         $whisper->increment('report_count');
         $whisper->refresh();
         if ($whisper->report_count >= $whisper->space->whisper_auto_hide_report_threshold) {
-            $whisper->forceFill([
-                'status' => 'hidden_by_report',
-                'hidden_at' => now(),
-            ])->save();
+            $lifecycle->hideByReport($whisper);
         }
-        $whisper->refresh();
+        $whisper->refresh()->loadMissing(['space', 'membership', 'image']);
 
         return $this->ok([
             'report' => ApiResource::report($report->fresh()),
