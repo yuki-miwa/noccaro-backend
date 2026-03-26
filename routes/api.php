@@ -8,6 +8,9 @@ use App\Http\Controllers\Api\V1\AdminSpaceController;
 use App\Http\Controllers\Api\V1\AdminWhisperController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\DeviceController;
+use App\Http\Controllers\Api\V1\LiveChatController;
+use App\Http\Controllers\Api\V1\LiveStreamController;
+use App\Http\Controllers\Api\V1\LiveThreadController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\PostController;
 use App\Http\Controllers\Api\V1\SpaceController;
@@ -15,6 +18,7 @@ use App\Http\Controllers\Api\V1\SpaceCreationRequestController;
 use App\Http\Controllers\Api\V1\SystemAdminAuditController;
 use App\Http\Controllers\Api\V1\SystemAdminAuthController;
 use App\Http\Controllers\Api\V1\SystemAdminDashboardController;
+use App\Http\Controllers\Api\V1\SystemAdminLiveController;
 use App\Http\Controllers\Api\V1\SystemAdminPostController;
 use App\Http\Controllers\Api\V1\SystemAdminReportController;
 use App\Http\Controllers\Api\V1\SystemAdminSpaceController;
@@ -49,6 +53,13 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/spaces/{space}', [SpaceController::class, 'show']);
         Route::get('/spaces/{space}/membership', [SpaceController::class, 'membership']);
         Route::get('/spaces/{space}/posts', [PostController::class, 'index']);
+        Route::get('/spaces/{space}/live-thread', [LiveThreadController::class, 'show']);
+        Route::post('/spaces/{space}/live-thread/start', [LiveThreadController::class, 'start']);
+        Route::post('/spaces/{space}/live-thread/close', [LiveThreadController::class, 'close']);
+        Route::get('/spaces/{space}/live-stream', [LiveStreamController::class, 'show']);
+        Route::post('/spaces/{space}/live-stream/start', [LiveStreamController::class, 'start']);
+        Route::post('/spaces/{space}/live-stream/end', [LiveStreamController::class, 'end']);
+        Route::post('/spaces/{space}/live-chat/token', [LiveChatController::class, 'issueToken']);
         Route::get('/spaces/{space}/whispers', [WhisperController::class, 'index']);
         Route::post('/spaces/{space}/whispers', [WhisperController::class, 'store']);
 
@@ -89,12 +100,15 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/auth/logout', [SystemAdminAuthController::class, 'logout']);
             Route::get('/me', [SystemAdminAuthController::class, 'me']);
             Route::get('/dashboard', [SystemAdminDashboardController::class, 'show']);
+            Route::get('/live-threads', [SystemAdminLiveController::class, 'index']);
 
             Route::get('/spaces', [SystemAdminSpaceController::class, 'index']);
             Route::post('/spaces', [SystemAdminSpaceController::class, 'store']);
             Route::get('/spaces/{space}', [SystemAdminSpaceController::class, 'show']);
             Route::patch('/spaces/{space}', [SystemAdminSpaceController::class, 'update']);
             Route::post('/spaces/{space}/primary-owner', [SystemAdminSpaceController::class, 'assignPrimaryOwner']);
+            Route::post('/spaces/{space}/live-thread/force-close', [SystemAdminLiveController::class, 'forceCloseThread']);
+            Route::post('/spaces/{space}/live-stream/force-end', [SystemAdminLiveController::class, 'forceEndStream']);
             Route::get('/space-creation-requests', [SystemAdminSpaceCreationRequestController::class, 'index']);
             Route::post('/space-creation-requests/{creationRequest}/approve', [SystemAdminSpaceCreationRequestController::class, 'approve']);
             Route::post('/space-creation-requests/{creationRequest}/reject', [SystemAdminSpaceCreationRequestController::class, 'reject']);

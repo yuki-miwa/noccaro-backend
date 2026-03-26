@@ -3,6 +3,8 @@
 namespace App\Support\Api;
 
 use App\Models\ContentReport;
+use App\Models\LiveStreamSession;
+use App\Models\LiveThread;
 use App\Models\MapWhisper;
 use App\Models\Space;
 use App\Models\SpaceCreationRequest;
@@ -14,6 +16,7 @@ use App\Models\SystemAdminAuditLog;
 use App\Models\User;
 use App\Models\UserPushDevice;
 use App\Models\WhisperImage;
+use App\Support\Live\IssuedLiveChatToken;
 use Illuminate\Support\Facades\URL;
 
 class ApiResource
@@ -428,6 +431,102 @@ class ApiResource
         ];
     }
 
+    public static function liveThread(?LiveThread $thread): ?array
+    {
+        if (! $thread) {
+            return null;
+        }
+
+        return [
+            'id' => $thread->public_id,
+            'spaceId' => $thread->space?->public_id,
+            'status' => $thread->status,
+            'startsAt' => self::iso($thread->starts_at),
+            'endsAt' => self::iso($thread->closed_at),
+            'createdAt' => self::iso($thread->created_at),
+            'updatedAt' => self::iso($thread->updated_at),
+        ];
+    }
+
+    public static function liveStream(?LiveStreamSession $stream, bool $includeBroadcastFields = false): array
+    {
+        if (! $stream) {
+            return [
+                'id' => null,
+                'liveThreadId' => null,
+                'spaceId' => null,
+                'status' => 'idle',
+                'isLive' => false,
+                'playbackUrl' => null,
+                'startedAt' => null,
+                'endedAt' => null,
+            ];
+        }
+
+        $payload = [
+            'id' => $stream->public_id,
+            'liveThreadId' => $stream->liveThread?->public_id,
+            'spaceId' => $stream->space?->public_id,
+            'status' => $stream->status,
+            'isLive' => $stream->status === 'live',
+            'playbackUrl' => $stream->status === 'live' ? $stream->ivs_playback_url : null,
+            'startedAt' => self::iso($stream->started_at),
+            'endedAt' => self::iso($stream->ended_at),
+        ];
+
+        if ($includeBroadcastFields) {
+            $payload['ingestEndpoint'] = $stream->ivs_ingest_endpoint;
+            $payload['channelArn'] = $stream->ivs_channel_arn;
+        }
+
+        return $payload;
+    }
+
+    public static function livePermissions(array $permissions): array
+    {
+        return [
+            'canWatch' => (bool) ($permissions['canWatch'] ?? false),
+            'canComment' => (bool) ($permissions['canComment'] ?? false),
+            'canStartThread' => (bool) ($permissions['canStartThread'] ?? false),
+            'canCloseThread' => (bool) ($permissions['canCloseThread'] ?? false),
+            'canStartStream' => (bool) ($permissions['canStartStream'] ?? false),
+            'canEndStream' => (bool) ($permissions['canEndStream'] ?? false),
+            'isPrimaryOwner' => (bool) ($permissions['isPrimaryOwner'] ?? false),
+        ];
+    }
+
+    public static function liveChatToken(IssuedLiveChatToken $token): array
+    {
+        return [
+            'roomArn' => $token->roomArn,
+            'roomId' => $token->roomId,
+            'endpoint' => $token->endpoint,
+            'token' => $token->token,
+            'expiresAt' => self::iso($token->tokenExpiresAt),
+            'sessionExpiresAt' => self::iso($token->sessionExpiresAt),
+        ];
+    }
+
+    public static function systemLiveSummary(Space $space, ?LiveThread $thread, ?LiveStreamSession $stream): array
+    {
+        $space->loadMissing('memberships.user');
+
+        $primaryOwner = $space->memberships
+            ->first(fn (SpaceMembership $membership) => $membership->role === 'primary_owner' && $membership->status === 'active');
+
+        return [
+            'space' => self::systemSpaceResource($space),
+            'primaryOwner' => [
+                'membershipId' => $primaryOwner?->public_id,
+                'userId' => $primaryOwner?->user?->public_id,
+                'displayName' => $primaryOwner?->user?->display_name,
+                'email' => $primaryOwner?->user?->email,
+            ],
+            'liveThread' => self::liveThread($thread),
+            'liveStream' => self::liveStream($stream),
+        ];
+    }
+
     public static function publicMembershipStatus(string $status): string
     {
         return $status === 'rejected' ? 'left' : $status;
@@ -479,6 +578,10 @@ class ApiResource
     {
         if ($value === null) {
             return null;
+        }
+
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format(DATE_ATOM);
         }
 
         return $value->toIso8601String();

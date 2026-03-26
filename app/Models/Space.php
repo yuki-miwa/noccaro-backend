@@ -66,4 +66,14 @@ class Space extends Model
     {
         return $this->hasMany(SpaceCreationRequest::class, 'approved_space_id');
     }
+
+    public function liveThreads(): HasMany
+    {
+        return $this->hasMany(LiveThread::class);
+    }
+
+    public function liveStreamSessions(): HasMany
+    {
+        return $this->hasMany(LiveStreamSession::class);
+    }
 }

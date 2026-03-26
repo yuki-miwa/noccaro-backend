@@ -50,4 +50,15 @@ class MembershipGuard
 
         return $membership;
     }
+
+    public function requireActivePrimaryOwnerMembership(User $user, Space $space): SpaceMembership
+    {
+        $membership = $this->requireActiveMembership($user, $space);
+
+        if ($membership->role !== 'primary_owner') {
+            throw new ApiException('FORBIDDEN', 'プライマリオーナーのみ実行できます。', 403);
+        }
+
+        return $membership;
+    }
 }
