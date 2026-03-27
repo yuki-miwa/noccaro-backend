@@ -23,7 +23,14 @@ class SystemAdminLiveController extends ApiController
         $items = $liveThreads->activeSummaries($limit, $status);
 
         return $this->collection(
-            $items->map(fn (array $item) => ApiResource::systemLiveSummary($item['space'], $item['liveThread'], $item['liveStream']))->all(),
+            $items->map(
+                fn (array $item) => ApiResource::systemLiveSummary(
+                    $item['space'],
+                    $item['scheduledThread'],
+                    $item['liveThread'],
+                    $item['liveStream'],
+                )
+            )->all(),
             [
                 'hasMore' => false,
                 'nextCursor' => null,
@@ -51,7 +58,14 @@ class SystemAdminLiveController extends ApiController
             ['spaceId' => $space->public_id],
         );
 
-        return $this->ok(ApiResource::systemLiveSummary($space->fresh('memberships.user'), $result['liveThread'], $result['liveStream']));
+        return $this->ok(
+            ApiResource::systemLiveSummary(
+                $space->fresh('memberships.user'),
+                $liveThreads->currentScheduleForSpace($space),
+                $result['liveThread'],
+                $result['liveStream'],
+            )
+        );
     }
 
     public function forceEndStream(
@@ -74,6 +88,13 @@ class SystemAdminLiveController extends ApiController
             ['spaceId' => $space->public_id],
         );
 
-        return $this->ok(ApiResource::systemLiveSummary($space->fresh('memberships.user'), $thread, $stream));
+        return $this->ok(
+            ApiResource::systemLiveSummary(
+                $space->fresh('memberships.user'),
+                $liveThreads->currentScheduleForSpace($space),
+                $thread,
+                $stream,
+            )
+        );
     }
 }

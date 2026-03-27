@@ -18,14 +18,14 @@ class LiveStreamController extends ApiController
         LiveThreadService $liveThreads,
     ): JsonResponse {
         $membership = $guard->requireActiveMembership($request->user(), $space);
-        $state = $liveThreads->currentStateForSpace($space);
+        $state = $liveThreads->stateForSpace($space, $membership);
 
         return $this->ok([
+            'scheduledThread' => ApiResource::liveThreadSchedule($state['scheduledThread']),
             'liveThread' => ApiResource::liveThread($state['liveThread']),
             'liveStream' => ApiResource::liveStream($state['liveStream']),
-            'permissions' => ApiResource::livePermissions(
-                $liveThreads->permissionsForMembership($membership, $state['liveThread'], $state['liveStream'])
-            ),
+            'permissions' => ApiResource::livePermissions($state['permissions']),
+            'eligibility' => ApiResource::liveEligibility($state['eligibility']),
             'spaceId' => $space->public_id,
         ]);
     }
@@ -38,19 +38,19 @@ class LiveStreamController extends ApiController
     ): JsonResponse {
         $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
         $stream = $liveThreads->startStream($space, $membership);
-        $thread = $liveThreads->activeThreadForSpace($space);
+        $state = $liveThreads->stateForSpace($space, $membership);
 
         return $this->ok([
-            'liveThread' => ApiResource::liveThread($thread),
+            'scheduledThread' => ApiResource::liveThreadSchedule($state['scheduledThread']),
+            'liveThread' => ApiResource::liveThread($state['liveThread']),
             'liveStream' => ApiResource::liveStream($stream, includeBroadcastFields: true),
             'broadcast' => [
                 'streamKey' => (string) config('live.stream_key'),
                 'ingestEndpoint' => (string) config('live.ingest_endpoint'),
                 'channelArn' => (string) config('live.channel_arn'),
             ],
-            'permissions' => ApiResource::livePermissions(
-                $liveThreads->permissionsForMembership($membership, $thread, $stream)
-            ),
+            'permissions' => ApiResource::livePermissions($state['permissions']),
+            'eligibility' => ApiResource::liveEligibility($state['eligibility']),
         ]);
     }
 
@@ -61,15 +61,15 @@ class LiveStreamController extends ApiController
         LiveThreadService $liveThreads,
     ): JsonResponse {
         $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
-        $stream = $liveThreads->endStream($space, $membership, reason: 'ended');
-        $thread = $liveThreads->activeThreadForSpace($space);
+        $liveThreads->endStream($space, $membership, reason: 'ended');
+        $state = $liveThreads->stateForSpace($space, $membership);
 
         return $this->ok([
-            'liveThread' => ApiResource::liveThread($thread),
-            'liveStream' => ApiResource::liveStream($stream),
-            'permissions' => ApiResource::livePermissions(
-                $liveThreads->permissionsForMembership($membership, $thread, null)
-            ),
+            'scheduledThread' => ApiResource::liveThreadSchedule($state['scheduledThread']),
+            'liveThread' => ApiResource::liveThread($state['liveThread']),
+            'liveStream' => ApiResource::liveStream($state['liveStream']),
+            'permissions' => ApiResource::livePermissions($state['permissions']),
+            'eligibility' => ApiResource::liveEligibility($state['eligibility']),
         ]);
     }
 }

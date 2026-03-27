@@ -18,9 +18,11 @@ class LiveThreadController extends ApiController
         LiveThreadService $liveThreads,
     ): JsonResponse {
         $membership = $guard->requireActiveMembership($request->user(), $space);
-        $state = $liveThreads->currentStateForSpace($space);
+        $currentLat = $request->filled('currentLat') ? (float) $request->input('currentLat') : null;
+        $currentLng = $request->filled('currentLng') ? (float) $request->input('currentLng') : null;
+        $state = $liveThreads->stateForSpace($space, $membership, $currentLat, $currentLng);
 
-        return $this->ok($this->statePayload($space, $membership, $state['liveThread'], $state['liveStream'], $liveThreads));
+        return $this->ok($this->statePayload($space, $state, $liveThreads));
     }
 
     public function start(
@@ -30,10 +32,14 @@ class LiveThreadController extends ApiController
         LiveThreadService $liveThreads,
     ): JsonResponse {
         $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
-        $thread = $liveThreads->startThread($space, $membership);
-        $stream = $liveThreads->activeStreamForSpace($space);
+        $payload = $request->validate([
+            'currentLat' => ['required', 'numeric', 'between:-90,90'],
+            'currentLng' => ['required', 'numeric', 'between:-180,180'],
+        ]);
+        $liveThreads->startThread($space, $membership, (float) $payload['currentLat'], (float) $payload['currentLng']);
+        $state = $liveThreads->stateForSpace($space, $membership, (float) $payload['currentLat'], (float) $payload['currentLng']);
 
-        return $this->ok($this->statePayload($space, $membership, $thread, $stream, $liveThreads));
+        return $this->ok($this->statePayload($space, $state, $liveThreads));
     }
 
     public function close(
@@ -43,37 +49,23 @@ class LiveThreadController extends ApiController
         LiveThreadService $liveThreads,
     ): JsonResponse {
         $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
-        $result = $liveThreads->closeThread($space, $membership, reason: 'closed');
+        $liveThreads->closeThread($space, $membership, reason: 'closed');
+        $state = $liveThreads->stateForSpace($space, $membership);
 
-        return $this->ok($this->statePayload(
-            $space,
-            $membership,
-            null,
-            null,
-            $liveThreads,
-            [
-                'liveThread' => $result['liveThread'],
-                'liveStream' => null,
-            ],
-        ));
+        return $this->ok($this->statePayload($space, $state, $liveThreads));
     }
 
     private function statePayload(
         Space $space,
-        $membership,
-        $thread,
-        $stream,
+        array $state,
         LiveThreadService $liveThreads,
-        ?array $stateOverride = null,
     ): array {
-        $thread = $stateOverride['liveThread'] ?? $thread;
-        $stream = $stateOverride['liveStream'] ?? $stream;
-        $permissions = $liveThreads->permissionsForMembership($membership, $thread, $stream);
-
         return [
-            'liveThread' => ApiResource::liveThread($thread),
-            'liveStream' => ApiResource::liveStream($stream),
-            'permissions' => ApiResource::livePermissions($permissions),
+            'scheduledThread' => ApiResource::liveThreadSchedule($state['scheduledThread']),
+            'liveThread' => ApiResource::liveThread($state['liveThread']),
+            'liveStream' => ApiResource::liveStream($state['liveStream']),
+            'permissions' => ApiResource::livePermissions($state['permissions']),
+            'eligibility' => ApiResource::liveEligibility($state['eligibility']),
             'chatPolicy' => $liveThreads->chatPolicy(),
             'spaceId' => $space->public_id,
         ];

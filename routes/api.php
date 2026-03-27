@@ -2,6 +2,7 @@
 
 use App\Exceptions\ApiException;
 use App\Http\Controllers\Api\V1\AdminMembershipController;
+use App\Http\Controllers\Api\V1\AdminLiveScheduleController;
 use App\Http\Controllers\Api\V1\AdminPostController;
 use App\Http\Controllers\Api\V1\AdminReportController;
 use App\Http\Controllers\Api\V1\AdminSpaceController;
@@ -75,6 +76,8 @@ Route::prefix('v1')->group(function (): void {
         Route::prefix('/admin')->group(function (): void {
             Route::get('/spaces/{space}', [AdminSpaceController::class, 'show']);
             Route::patch('/spaces/{space}', [AdminSpaceController::class, 'update']);
+            Route::get('/spaces/{space}/live-thread-schedule', [AdminLiveScheduleController::class, 'show']);
+            Route::patch('/spaces/{space}/live-thread-schedule', [AdminLiveScheduleController::class, 'update']);
             Route::get('/spaces/{space}/join-requests', [AdminSpaceController::class, 'joinRequests']);
             Route::get('/spaces/{space}/members', [AdminSpaceController::class, 'members']);
             Route::get('/spaces/{space}/posts', [AdminSpaceController::class, 'posts']);

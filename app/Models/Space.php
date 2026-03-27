@@ -72,6 +72,11 @@ class Space extends Model
         return $this->hasMany(LiveThread::class);
     }
 
+    public function liveThreadSchedules(): HasMany
+    {
+        return $this->hasMany(LiveThreadSchedule::class);
+    }
+
     public function liveStreamSessions(): HasMany
     {
         return $this->hasMany(LiveStreamSession::class);

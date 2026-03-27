@@ -5,6 +5,7 @@ namespace App\Support\Live;
 use App\Exceptions\ApiException;
 use App\Models\LiveStreamSession;
 use App\Models\LiveThread;
+use App\Models\LiveThreadSchedule;
 use App\Models\Space;
 use App\Models\SpaceMembership;
 use App\Models\SystemAdmin;
@@ -14,6 +15,21 @@ use Illuminate\Support\Collection;
 class LiveThreadService
 {
     public function __construct(private readonly DatabaseManager $db) {}
+
+    public function currentScheduleForSpace(Space $space): ?LiveThreadSchedule
+    {
+        $schedule = LiveThreadSchedule::query()
+            ->where('space_id', $space->id)
+            ->latest('updated_at')
+            ->latest('id')
+            ->first();
+
+        if (! $schedule) {
+            return null;
+        }
+
+        return $this->refreshScheduleStatus($schedule);
+    }
 
     public function activeThreadForSpace(Space $space): ?LiveThread
     {
@@ -35,11 +51,22 @@ class LiveThreadService
             ->first();
     }
 
-    public function currentStateForSpace(Space $space): array
-    {
+    public function stateForSpace(
+        Space $space,
+        SpaceMembership $membership,
+        ?float $currentLat = null,
+        ?float $currentLng = null,
+    ): array {
+        $schedule = $this->currentScheduleForSpace($space);
+        $thread = $this->activeThreadForSpace($space);
+        $stream = $this->activeStreamForSpace($space);
+
         return [
-            'liveThread' => $this->activeThreadForSpace($space),
-            'liveStream' => $this->activeStreamForSpace($space),
+            'scheduledThread' => $schedule,
+            'liveThread' => $thread,
+            'liveStream' => $stream,
+            'permissions' => $this->permissionsForMembership($membership, $thread, $stream),
+            'eligibility' => $this->eligibilityForMembership($membership, $schedule, $thread, $currentLat, $currentLng),
         ];
     }
 
@@ -63,6 +90,53 @@ class LiveThreadService
         ];
     }
 
+    public function eligibilityForMembership(
+        SpaceMembership $membership,
+        ?LiveThreadSchedule $schedule,
+        ?LiveThread $thread,
+        ?float $currentLat = null,
+        ?float $currentLng = null,
+    ): array {
+        $windowOpen = $schedule ? $this->windowOpen($schedule) : false;
+        $distanceMeters = null;
+        $insideStartArea = null;
+        $reasonCode = null;
+
+        if ($membership->status !== 'active' || $membership->role !== 'primary_owner') {
+            $reasonCode = 'FORBIDDEN';
+        } elseif ($thread?->status === 'active') {
+            $reasonCode = 'LIVE_THREAD_ALREADY_ACTIVE';
+        } elseif (! $schedule) {
+            $reasonCode = 'LIVE_THREAD_SCHEDULE_NOT_FOUND';
+        } elseif ($this->windowNotOpenedYet($schedule)) {
+            $reasonCode = 'LIVE_THREAD_WINDOW_NOT_OPEN';
+        } elseif ($this->windowExpired($schedule)) {
+            $reasonCode = 'LIVE_THREAD_WINDOW_EXPIRED';
+        } elseif ($currentLat !== null && $currentLng !== null) {
+            $distanceMeters = round(
+                $this->distanceMeters(
+                    $schedule->area_center_lat,
+                    $schedule->area_center_lng,
+                    $currentLat,
+                    $currentLng,
+                ),
+                1,
+            );
+            $insideStartArea = $distanceMeters <= $schedule->area_radius_m;
+            if (! $insideStartArea) {
+                $reasonCode = 'LIVE_THREAD_OUT_OF_AREA';
+            }
+        }
+
+        return [
+            'canStartThreadNow' => $reasonCode === null && $insideStartArea === true,
+            'insideStartArea' => $insideStartArea,
+            'distanceMeters' => $distanceMeters,
+            'windowOpen' => $windowOpen,
+            'reasonCode' => $reasonCode,
+        ];
+    }
+
     public function chatPolicy(): array
     {
         return [
@@ -73,20 +147,97 @@ class LiveThreadService
         ];
     }
 
-    public function startThread(Space $space, SpaceMembership $actor): LiveThread
+    public function upsertSchedule(Space $space, SpaceMembership $actor, array $attributes): LiveThreadSchedule
     {
-        return $this->db->transaction(function () use ($space, $actor): LiveThread {
-            $existing = $this->activeThreadForSpace($space);
-            if ($existing) {
-                return $existing;
+        return $this->db->transaction(function () use ($space, $actor, $attributes): LiveThreadSchedule {
+            $schedule = LiveThreadSchedule::query()->firstOrNew(['space_id' => $space->id]);
+
+            if (! $schedule->exists) {
+                $schedule->created_by_membership_id = $actor->id;
             }
 
-            return LiveThread::query()->create([
+            $schedule->fill([
+                'status' => 'scheduled',
+                'starts_at' => $attributes['starts_at'],
+                'ends_at' => $attributes['ends_at'],
+                'area_center_lat' => $attributes['area_center_lat'],
+                'area_center_lng' => $attributes['area_center_lng'],
+                'area_radius_m' => $attributes['area_radius_m'],
+                'updated_by_membership_id' => $actor->id,
+                'activated_live_thread_id' => null,
+            ]);
+            $schedule->save();
+
+            return $schedule->fresh();
+        });
+    }
+
+    public function startThread(
+        Space $space,
+        SpaceMembership $actor,
+        float $currentLat,
+        float $currentLng,
+    ): LiveThread {
+        return $this->db->transaction(function () use ($space, $actor, $currentLat, $currentLng): LiveThread {
+            $existing = $this->activeThreadForSpace($space);
+            if ($existing) {
+                throw new ApiException('LIVE_THREAD_ALREADY_ACTIVE', 'ライブスレッドはすでに開始されています。', 409);
+            }
+
+            $schedule = LiveThreadSchedule::query()
+                ->where('space_id', $space->id)
+                ->lockForUpdate()
+                ->latest('updated_at')
+                ->latest('id')
+                ->first();
+
+            if (! $schedule) {
+                throw new ApiException('LIVE_THREAD_SCHEDULE_NOT_FOUND', 'ライブスレッド開始条件が設定されていません。', 409);
+            }
+
+            $schedule = $this->refreshScheduleStatus($schedule);
+
+            if ($schedule->status === 'expired' || $this->windowExpired($schedule)) {
+                throw new ApiException('LIVE_THREAD_WINDOW_EXPIRED', '開始可能時間を過ぎたためライブスレッドを開始できません。', 409);
+            }
+
+            if ($this->windowNotOpenedYet($schedule)) {
+                throw new ApiException('LIVE_THREAD_WINDOW_NOT_OPEN', '開始可能時間前のためライブスレッドを開始できません。', 409);
+            }
+
+            $distanceMeters = $this->distanceMeters(
+                $schedule->area_center_lat,
+                $schedule->area_center_lng,
+                $currentLat,
+                $currentLng,
+            );
+
+            if ($distanceMeters > $schedule->area_radius_m) {
+                throw new ApiException(
+                    'LIVE_THREAD_OUT_OF_AREA',
+                    '開始エリア外のためライブスレッドを開始できません。',
+                    409,
+                    [
+                        'distanceMeters' => round($distanceMeters, 1),
+                        'allowedRadiusM' => $schedule->area_radius_m,
+                    ],
+                );
+            }
+
+            $thread = LiveThread::query()->create([
                 'space_id' => $space->id,
                 'status' => 'active',
                 'created_by_membership_id' => $actor->id,
                 'starts_at' => now(),
             ]);
+
+            $schedule->forceFill([
+                'status' => 'started',
+                'updated_by_membership_id' => $actor->id,
+                'activated_live_thread_id' => $thread->id,
+            ])->save();
+
+            return $thread->fresh();
         });
     }
 
@@ -101,7 +252,12 @@ class LiveThreadService
             $stream = $this->activeStreamForSpace($space);
 
             if ($stream) {
-                $stream = $this->endActiveStream($stream, $actor, $systemAdmin, $reason === 'force_closed' ? 'force_ended' : 'thread_closed');
+                $stream = $this->endActiveStream(
+                    $stream,
+                    $actor,
+                    $systemAdmin,
+                    $reason === 'force_closed' ? 'force_ended' : 'thread_closed',
+                );
             }
 
             if (! $thread) {
@@ -176,6 +332,7 @@ class LiveThreadService
     {
         $query = Space::query()->with([
             'memberships.user',
+            'liveThreadSchedules' => fn ($scheduleQuery) => $scheduleQuery->latest('updated_at')->latest('id'),
             'liveThreads' => fn ($threadQuery) => $threadQuery->latest('starts_at')->latest('id'),
             'liveStreamSessions' => fn ($streamQuery) => $streamQuery->latest('started_at')->latest('id'),
         ]);
@@ -186,16 +343,28 @@ class LiveThreadService
                     ->whereHas('liveThreads', fn ($threadQuery) => $threadQuery->where('status', 'active'))
                     ->orWhereHas('liveStreamSessions', fn ($streamQuery) => $streamQuery->where('status', 'live'));
             });
+        } elseif ($status === 'scheduled') {
+            $query->whereHas('liveThreadSchedules', fn ($scheduleQuery) => $scheduleQuery->where('status', 'scheduled'));
+        } else {
+            $query->where(function ($spaceQuery): void {
+                $spaceQuery
+                    ->whereHas('liveThreadSchedules')
+                    ->orWhereHas('liveThreads')
+                    ->orWhereHas('liveStreamSessions');
+            });
         }
 
         return $query->orderByDesc('created_at')->limit($limit)->get()->map(function (Space $space): array {
-            $thread = $space->liveThreads->firstWhere('status', 'active');
-            $stream = $space->liveStreamSessions->firstWhere('status', 'live');
+            $schedule = $space->liveThreadSchedules->first();
+            if ($schedule instanceof LiveThreadSchedule) {
+                $schedule = $this->refreshScheduleStatus($schedule);
+            }
 
             return [
                 'space' => $space,
-                'liveThread' => $thread,
-                'liveStream' => $stream,
+                'scheduledThread' => $schedule,
+                'liveThread' => $space->liveThreads->firstWhere('status', 'active'),
+                'liveStream' => $space->liveStreamSessions->firstWhere('status', 'live'),
             ];
         });
     }
@@ -215,5 +384,44 @@ class LiveThreadService
         ])->save();
 
         return $stream->fresh();
+    }
+
+    private function refreshScheduleStatus(LiveThreadSchedule $schedule): LiveThreadSchedule
+    {
+        if ($schedule->status === 'scheduled' && $this->windowExpired($schedule)) {
+            $schedule->forceFill(['status' => 'expired'])->save();
+            return $schedule->fresh();
+        }
+
+        return $schedule;
+    }
+
+    private function windowOpen(LiveThreadSchedule $schedule): bool
+    {
+        return ! $this->windowNotOpenedYet($schedule) && ! $this->windowExpired($schedule);
+    }
+
+    private function windowNotOpenedYet(LiveThreadSchedule $schedule): bool
+    {
+        return now()->lt($schedule->starts_at);
+    }
+
+    private function windowExpired(LiveThreadSchedule $schedule): bool
+    {
+        return now()->gte($schedule->ends_at);
+    }
+
+    private function distanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $earthRadius = 6371000;
+        $latDelta = deg2rad($lat2 - $lat1);
+        $lngDelta = deg2rad($lng2 - $lng1);
+
+        $sinLat = sin($latDelta / 2);
+        $sinLng = sin($lngDelta / 2);
+        $a = $sinLat * $sinLat
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * $sinLng * $sinLng;
+
+        return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 }

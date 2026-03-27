@@ -63,6 +63,44 @@ class AdminApiTest extends TestCase
         ]);
     }
 
+    public function test_owner_can_read_and_update_live_thread_schedule(): void
+    {
+        [$owner, $space] = $this->seedOwnerContext();
+
+        Sanctum::actingAs($owner);
+
+        $this->getJson('/api/v1/admin/spaces/'.$space->public_id.'/live-thread-schedule')
+            ->assertOk()
+            ->assertJsonPath('data.scheduledThread', null)
+            ->assertJsonPath('data.liveThread', null)
+            ->assertJsonPath('data.liveStream.status', 'idle')
+            ->assertJsonPath('data.permissions.canStartThread', true)
+            ->assertJsonPath('data.eligibility.reasonCode', 'LIVE_THREAD_SCHEDULE_NOT_FOUND');
+
+        $this->patchJson('/api/v1/admin/spaces/'.$space->public_id.'/live-thread-schedule', [
+            'startsAt' => now()->addMinutes(10)->toIso8601String(),
+            'endsAt' => now()->addHour()->toIso8601String(),
+            'areaCenterLat' => 35.680123,
+            'areaCenterLng' => 139.765456,
+            'areaRadiusM' => 120,
+        ])
+            ->assertOk()
+            ->assertJsonPath('data.scheduledThread.status', 'scheduled')
+            ->assertJsonPath('data.scheduledThread.areaCenterLat', 35.680123)
+            ->assertJsonPath('data.scheduledThread.areaCenterLng', 139.765456)
+            ->assertJsonPath('data.scheduledThread.areaRadiusM', 120)
+            ->assertJsonPath('data.eligibility.windowOpen', false)
+            ->assertJsonPath('data.eligibility.reasonCode', 'LIVE_THREAD_WINDOW_NOT_OPEN');
+
+        $this->assertDatabaseHas('live_thread_schedules', [
+            'space_id' => $space->id,
+            'area_center_lat' => 35.680123,
+            'area_center_lng' => 139.765456,
+            'area_radius_m' => 120,
+            'status' => 'scheduled',
+        ]);
+    }
+
     public function test_owner_can_approve_and_reject_join_requests(): void
     {
         [$owner, $space] = $this->seedOwnerContext();

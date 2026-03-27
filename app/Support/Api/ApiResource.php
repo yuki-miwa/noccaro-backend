@@ -5,6 +5,7 @@ namespace App\Support\Api;
 use App\Models\ContentReport;
 use App\Models\LiveStreamSession;
 use App\Models\LiveThread;
+use App\Models\LiveThreadSchedule;
 use App\Models\MapWhisper;
 use App\Models\Space;
 use App\Models\SpaceCreationRequest;
@@ -448,6 +449,27 @@ class ApiResource
         ];
     }
 
+    public static function liveThreadSchedule(?LiveThreadSchedule $schedule): ?array
+    {
+        if (! $schedule) {
+            return null;
+        }
+
+        return [
+            'id' => $schedule->public_id,
+            'spaceId' => $schedule->space?->public_id,
+            'status' => $schedule->status,
+            'startsAt' => self::iso($schedule->starts_at),
+            'endsAt' => self::iso($schedule->ends_at),
+            'areaCenterLat' => (float) $schedule->area_center_lat,
+            'areaCenterLng' => (float) $schedule->area_center_lng,
+            'areaRadiusM' => (int) $schedule->area_radius_m,
+            'activatedLiveThreadId' => $schedule->activatedLiveThread?->public_id,
+            'createdAt' => self::iso($schedule->created_at),
+            'updatedAt' => self::iso($schedule->updated_at),
+        ];
+    }
+
     public static function liveStream(?LiveStreamSession $stream, bool $includeBroadcastFields = false): array
     {
         if (! $stream) {
@@ -495,6 +517,17 @@ class ApiResource
         ];
     }
 
+    public static function liveEligibility(array $eligibility): array
+    {
+        return [
+            'canStartThreadNow' => (bool) ($eligibility['canStartThreadNow'] ?? false),
+            'insideStartArea' => $eligibility['insideStartArea'] ?? null,
+            'distanceMeters' => $eligibility['distanceMeters'] ?? null,
+            'windowOpen' => (bool) ($eligibility['windowOpen'] ?? false),
+            'reasonCode' => $eligibility['reasonCode'] ?? null,
+        ];
+    }
+
     public static function liveChatToken(IssuedLiveChatToken $token): array
     {
         return [
@@ -507,7 +540,23 @@ class ApiResource
         ];
     }
 
-    public static function systemLiveSummary(Space $space, ?LiveThread $thread, ?LiveStreamSession $stream): array
+    public static function systemLiveSummary(
+        Space $space,
+        ?LiveThreadSchedule $schedule,
+        ?LiveThread $thread,
+        ?LiveStreamSession $stream,
+    ): array
+    {
+        return [
+            'space' => self::systemSpaceResource($space),
+            'primaryOwner' => self::systemPrimaryOwner($space),
+            'scheduledThread' => self::liveThreadSchedule($schedule),
+            'liveThread' => self::liveThread($thread),
+            'liveStream' => self::liveStream($stream),
+        ];
+    }
+
+    public static function systemPrimaryOwner(Space $space): array
     {
         $space->loadMissing('memberships.user');
 
@@ -515,15 +564,10 @@ class ApiResource
             ->first(fn (SpaceMembership $membership) => $membership->role === 'primary_owner' && $membership->status === 'active');
 
         return [
-            'space' => self::systemSpaceResource($space),
-            'primaryOwner' => [
-                'membershipId' => $primaryOwner?->public_id,
-                'userId' => $primaryOwner?->user?->public_id,
-                'displayName' => $primaryOwner?->user?->display_name,
-                'email' => $primaryOwner?->user?->email,
-            ],
-            'liveThread' => self::liveThread($thread),
-            'liveStream' => self::liveStream($stream),
+            'membershipId' => $primaryOwner?->public_id,
+            'userId' => $primaryOwner?->user?->public_id,
+            'displayName' => $primaryOwner?->user?->display_name,
+            'email' => $primaryOwner?->user?->email,
         ];
     }
 
