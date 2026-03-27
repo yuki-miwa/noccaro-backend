@@ -65,4 +65,25 @@ class AdminLiveScheduleController extends ApiController
             'spaceId' => $space->public_id,
         ]);
     }
+
+    public function destroy(
+        Request $request,
+        Space $space,
+        SpaceAdminGuard $guard,
+        LiveThreadService $liveThreads,
+    ): JsonResponse {
+        $actor = $guard->actorForSpace($request->user(), $space);
+        $schedule = $liveThreads->cancelSchedule($space, $actor);
+        $state = $liveThreads->stateForSpace($space, $actor);
+
+        return $this->ok([
+            'scheduledThread' => ApiResource::liveThreadSchedule($schedule),
+            'liveThread' => ApiResource::liveThread($state['liveThread']),
+            'liveStream' => ApiResource::liveStream($state['liveStream']),
+            'permissions' => ApiResource::livePermissions($state['permissions']),
+            'eligibility' => ApiResource::liveEligibility($state['eligibility']),
+            'chatPolicy' => $liveThreads->chatPolicy(),
+            'spaceId' => $space->public_id,
+        ]);
+    }
 }

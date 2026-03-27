@@ -78,6 +78,7 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/spaces/{space}', [AdminSpaceController::class, 'update']);
             Route::get('/spaces/{space}/live-thread-schedule', [AdminLiveScheduleController::class, 'show']);
             Route::patch('/spaces/{space}/live-thread-schedule', [AdminLiveScheduleController::class, 'update']);
+            Route::delete('/spaces/{space}/live-thread-schedule', [AdminLiveScheduleController::class, 'destroy']);
             Route::get('/spaces/{space}/join-requests', [AdminSpaceController::class, 'joinRequests']);
             Route::get('/spaces/{space}/members', [AdminSpaceController::class, 'members']);
             Route::get('/spaces/{space}/posts', [AdminSpaceController::class, 'posts']);

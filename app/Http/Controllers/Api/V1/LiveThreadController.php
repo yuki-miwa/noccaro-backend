@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exceptions\ApiException;
 use App\Models\Space;
 use App\Support\Api\ApiResource;
 use App\Support\Live\LiveThreadService;
@@ -31,15 +32,9 @@ class LiveThreadController extends ApiController
         MembershipGuard $guard,
         LiveThreadService $liveThreads,
     ): JsonResponse {
-        $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
-        $payload = $request->validate([
-            'currentLat' => ['required', 'numeric', 'between:-90,90'],
-            'currentLng' => ['required', 'numeric', 'between:-180,180'],
-        ]);
-        $liveThreads->startThread($space, $membership, (float) $payload['currentLat'], (float) $payload['currentLng']);
-        $state = $liveThreads->stateForSpace($space, $membership, (float) $payload['currentLat'], (float) $payload['currentLng']);
+        $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
 
-        return $this->ok($this->statePayload($space, $state, $liveThreads));
+        throw new ApiException('FORBIDDEN', 'ライブスレッドは予約時刻で自動開始されます。', 403);
     }
 
     public function close(
@@ -48,11 +43,9 @@ class LiveThreadController extends ApiController
         MembershipGuard $guard,
         LiveThreadService $liveThreads,
     ): JsonResponse {
-        $membership = $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
-        $liveThreads->closeThread($space, $membership, reason: 'closed');
-        $state = $liveThreads->stateForSpace($space, $membership);
+        $guard->requireActivePrimaryOwnerMembership($request->user(), $space);
 
-        return $this->ok($this->statePayload($space, $state, $liveThreads));
+        throw new ApiException('FORBIDDEN', 'ライブスレッドは終了時刻で自動終了されます。', 403);
     }
 
     private function statePayload(
@@ -63,7 +56,10 @@ class LiveThreadController extends ApiController
         return [
             'scheduledThread' => ApiResource::liveThreadSchedule($state['scheduledThread']),
             'liveThread' => ApiResource::liveThread($state['liveThread']),
-            'liveStream' => ApiResource::liveStream($state['liveStream']),
+            'liveStream' => ApiResource::liveStream(
+                $state['liveStream'],
+                revealPlayback: (bool) ($state['permissions']['canWatch'] ?? false),
+            ),
             'permissions' => ApiResource::livePermissions($state['permissions']),
             'eligibility' => ApiResource::liveEligibility($state['eligibility']),
             'chatPolicy' => $liveThreads->chatPolicy(),

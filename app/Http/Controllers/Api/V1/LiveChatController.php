@@ -21,10 +21,36 @@ class LiveChatController extends ApiController
         LiveChatTokenIssuer $tokens,
     ): JsonResponse {
         $membership = $guard->requireActiveMembership($request->user(), $space);
-        $thread = $liveThreads->activeThreadForSpace($space);
+        $payload = $request->validate([
+            'currentLat' => ['required', 'numeric', 'between:-90,90'],
+            'currentLng' => ['required', 'numeric', 'between:-180,180'],
+        ]);
+        $state = $liveThreads->stateForSpace($space, $membership, (float) $payload['currentLat'], (float) $payload['currentLng']);
 
-        if (! $thread) {
-            throw new ApiException('LIVE_THREAD_NOT_ACTIVE', 'ライブスレッドが開始されていません。', 409);
+        if (! $state['permissions']['canComment']) {
+            $reasonCode = $state['eligibility']['reasonCode'] ?? 'LIVE_CHAT_UNAVAILABLE';
+            if ($reasonCode === 'LIVE_THREAD_OUT_OF_AREA') {
+                throw new ApiException(
+                    'LIVE_THREAD_OUT_OF_AREA',
+                    '配信エリア外のためライブチャットに参加できません。',
+                    409,
+                    [
+                        'distanceMeters' => $state['eligibility']['distanceMeters'],
+                        'allowedRadiusM' => $state['eligibility']['allowedRadiusM'],
+                    ],
+                );
+            }
+
+            throw new ApiException(
+                $reasonCode,
+                match ($reasonCode) {
+                    'LIVE_THREAD_WINDOW_NOT_OPEN' => 'ライブスレッド開始前のためチャットに参加できません。',
+                    'LIVE_THREAD_WINDOW_EXPIRED' => 'ライブスレッド終了後のためチャットに参加できません。',
+                    'LIVE_THREAD_NOT_ACTIVE' => 'ライブスレッドが開始されていません。',
+                    default => 'ライブチャットは現在利用できません。',
+                },
+                in_array($reasonCode, ['FORBIDDEN'], true) ? 403 : 409,
+            );
         }
 
         $token = $tokens->issue(

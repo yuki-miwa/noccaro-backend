@@ -74,7 +74,7 @@ class AdminApiTest extends TestCase
             ->assertJsonPath('data.scheduledThread', null)
             ->assertJsonPath('data.liveThread', null)
             ->assertJsonPath('data.liveStream.status', 'idle')
-            ->assertJsonPath('data.permissions.canStartThread', true)
+            ->assertJsonPath('data.permissions.canStartThread', false)
             ->assertJsonPath('data.eligibility.reasonCode', 'LIVE_THREAD_SCHEDULE_NOT_FOUND');
 
         $this->patchJson('/api/v1/admin/spaces/'.$space->public_id.'/live-thread-schedule', [
@@ -92,12 +92,16 @@ class AdminApiTest extends TestCase
             ->assertJsonPath('data.eligibility.windowOpen', false)
             ->assertJsonPath('data.eligibility.reasonCode', 'LIVE_THREAD_WINDOW_NOT_OPEN');
 
+        $this->deleteJson('/api/v1/admin/spaces/'.$space->public_id.'/live-thread-schedule')
+            ->assertOk()
+            ->assertJsonPath('data.scheduledThread.status', 'cancelled');
+
         $this->assertDatabaseHas('live_thread_schedules', [
             'space_id' => $space->id,
             'area_center_lat' => 35.680123,
             'area_center_lng' => 139.765456,
             'area_radius_m' => 120,
-            'status' => 'scheduled',
+            'status' => 'cancelled',
         ]);
     }
 

@@ -470,7 +470,11 @@ class ApiResource
         ];
     }
 
-    public static function liveStream(?LiveStreamSession $stream, bool $includeBroadcastFields = false): array
+    public static function liveStream(
+        ?LiveStreamSession $stream,
+        bool $includeBroadcastFields = false,
+        bool $revealPlayback = true,
+    ): array
     {
         if (! $stream) {
             return [
@@ -491,7 +495,7 @@ class ApiResource
             'spaceId' => $stream->space?->public_id,
             'status' => $stream->status,
             'isLive' => $stream->status === 'live',
-            'playbackUrl' => $stream->status === 'live' ? $stream->ivs_playback_url : null,
+            'playbackUrl' => $stream->status === 'live' && $revealPlayback ? $stream->ivs_playback_url : null,
             'startedAt' => self::iso($stream->started_at),
             'endedAt' => self::iso($stream->ended_at),
         ];
@@ -521,9 +525,14 @@ class ApiResource
     {
         return [
             'canStartThreadNow' => (bool) ($eligibility['canStartThreadNow'] ?? false),
+            'canAccessLiveNow' => (bool) ($eligibility['canAccessLiveNow'] ?? false),
             'insideStartArea' => $eligibility['insideStartArea'] ?? null,
+            'insideLiveArea' => $eligibility['insideLiveArea'] ?? null,
+            'insideAudienceArea' => $eligibility['insideAudienceArea'] ?? null,
             'distanceMeters' => $eligibility['distanceMeters'] ?? null,
+            'allowedRadiusM' => $eligibility['allowedRadiusM'] ?? null,
             'windowOpen' => (bool) ($eligibility['windowOpen'] ?? false),
+            'threadActive' => (bool) ($eligibility['threadActive'] ?? false),
             'reasonCode' => $eligibility['reasonCode'] ?? null,
         ];
     }

@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('noccaro:expire-whispers')->everyMinute()->withoutOverlapping();
+Schedule::command('noccaro:sync-live-threads')->everyMinute()->withoutOverlapping();
